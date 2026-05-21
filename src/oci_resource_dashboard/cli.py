@@ -1,19 +1,25 @@
 """Command line interface for the OCI resource dashboard generator."""
 
 from pathlib import Path
+from typing import Optional
 
 import click
 from rich.console import Console
 from rich.table import Table
 
-from .auth import AuthSettings, build_auth_context
-from .compartments import OciCompartmentDiscovery
-from .compliance import load_mandatory_tags
-from .csv_report import write_csv_outputs
-from .html_report import write_html_dashboard
-from .resource_search import OciResourceSearch, enrich_compartment_names, sample_resources
+from .scanner import scan_resources, scan_summary_rows
 
 console = Console()
+
+
+def _validate_positive_integer(
+    _ctx: click.Context,
+    _param: click.Parameter,
+    value: Optional[int],
+) -> Optional[int]:
+    if value is not None and value <= 0:
+        raise click.BadParameter("must be greater than zero")
+    return value
 
 
 @click.group()
@@ -53,6 +59,19 @@ def main() -> None:
     is_flag=True,
     help="Use in-memory sample resources instead of calling OCI APIs.",
 )
+@click.option(
+    "--max-resources",
+    type=int,
+    callback=_validate_positive_integer,
+    help="Limit resources processed after discovery for testing.",
+)
+@click.option(
+    "--resource-query",
+    help=(
+        "Override the OCI Resource Search query. Use {compartment_id} as a placeholder "
+        "when the query should remain compartment-scoped."
+    ),
+)
 def scan(
     auth_method: str,
     region: str,
@@ -61,44 +80,25 @@ def scan(
     mandatory_tags: Path,
     output_dir: Path,
     sample: bool,
+    max_resources: Optional[int],
+    resource_query: Optional[str],
 ) -> None:
     """Generate tag-based OCI resource ownership reports."""
 
-    configured_tags = load_mandatory_tags(mandatory_tags)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    compartment_count = 0
-    if sample:
-        resources = sample_resources()
-        compartment_count = len({resource.get("compartment_id", "") for resource in resources})
-    else:
-        auth_context = build_auth_context(AuthSettings(method=auth_method, region=region))
-        compartment_result = OciCompartmentDiscovery(auth_context).discover_compartments(
-            compartment_id,
-            include_subcompartments,
-        )
-        compartment_count = len(compartment_result.compartment_ids)
-        discovered_resources = OciResourceSearch(
-            auth_context,
-            compartment_result.compartment_id_to_name,
-        ).search_resources(compartment_result.compartment_ids)
-        resources = enrich_compartment_names(
-            discovered_resources,
-            compartment_result.compartment_id_to_name,
-        )
-
-    generated_files = write_csv_outputs(resources, configured_tags, output_dir)
-    generated_files.append(
-        write_html_dashboard(
-            resources,
-            configured_tags,
-            output_dir,
-            region=region,
-            root_compartment_id=compartment_id,
-        )
+    result = scan_resources(
+        auth_method=auth_method,
+        region=region,
+        compartment_id=compartment_id,
+        include_subcompartments=include_subcompartments,
+        mandatory_tags_path=mandatory_tags,
+        output_dir=output_dir,
+        sample=sample,
+        max_resources=max_resources,
+        resource_query=resource_query,
+        console=console,
     )
 
-    table = Table(title="OCI Resource Dashboard Scan Plan")
+    table = Table(title="OCI Resource Dashboard Scan Summary")
     table.add_column("Setting", style="bold")
     table.add_column("Value")
     table.add_row("Auth", auth_method)
@@ -106,19 +106,16 @@ def scan(
     table.add_row("Compartment ID", compartment_id)
     table.add_row("Include Subcompartments", "yes" if include_subcompartments else "no")
     table.add_row("Mandatory Tag Config", str(mandatory_tags))
-    table.add_row("Mandatory Tags Loaded", str(len(configured_tags)))
     table.add_row("Output Directory", str(output_dir))
-    table.add_row("Mode", "sample" if sample else "live OCI")
-    table.add_row("Compartments Selected", str(compartment_count))
-    table.add_row("Total Resources Discovered", str(len(resources)))
-    table.add_row("Attribution Source", "resource tags only; OCI Audit is not used")
+    for setting, value in scan_summary_rows(result):
+        table.add_row(setting, value)
 
     console.print(table)
 
     files_table = Table(title="Generated Files")
     files_table.add_column("File", style="bold")
     files_table.add_column("Path")
-    for generated_file in generated_files:
+    for generated_file in result.generated_files:
         files_table.add_row(generated_file.name, str(generated_file))
     console.print(files_table)
 

@@ -3,7 +3,11 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from oci_resource_dashboard.auth import OciAuthContext
-from oci_resource_dashboard.resource_search import OciResourceSearch, enrich_compartment_names
+from oci_resource_dashboard.resource_search import (
+    OciResourceSearch,
+    build_resource_query,
+    enrich_compartment_names,
+)
 
 
 class FakeStructuredSearchDetails:
@@ -81,3 +85,21 @@ def test_enrich_compartment_names_fills_missing_names():
 
     assert enriched[0]["compartment_name"] == "Network"
     assert resources[0].get("compartment_name") is None
+
+
+def test_build_resource_query_uses_custom_query_with_compartment_placeholder():
+    query = build_resource_query(
+        "ocid1.compartment.oc1..app",
+        "query instance resources where compartmentId = '{compartment_id}'",
+    )
+
+    assert query == "query instance resources where compartmentId = 'ocid1.compartment.oc1..app'"
+
+
+def test_build_resource_query_uses_custom_query_without_placeholder():
+    query = build_resource_query(
+        "ocid1.compartment.oc1..app",
+        "query bucket resources",
+    )
+
+    assert query == "query bucket resources"

@@ -8,6 +8,9 @@ from .auth import OciAuthContext
 from .models import ResourceRecord
 
 
+DEFAULT_RESOURCE_QUERY = "query all resources where compartmentId = '{compartment_id}'"
+
+
 class ResourceSearch(Protocol):
     """Interface for discovering OCI resources."""
 
@@ -37,6 +40,16 @@ def _safe_tags(value: Any) -> dict[str, Any]:
 
 def _escape_query_value(value: str) -> str:
     return value.replace("'", "\\'")
+
+
+def build_resource_query(compartment_id: str, resource_query: Optional[str] = None) -> str:
+    """Build the Resource Search query for one compartment."""
+
+    if resource_query:
+        if "{compartment_id}" in resource_query:
+            return resource_query.format(compartment_id=_escape_query_value(compartment_id))
+        return resource_query
+    return DEFAULT_RESOURCE_QUERY.format(compartment_id=_escape_query_value(compartment_id))
 
 
 class OciResourceSearch:
@@ -74,7 +87,11 @@ class OciResourceSearch:
             matching_context_type="NONE",
         )
 
-    def search_resources(self, compartment_ids: Iterable[str]) -> list[dict[str, Any]]:
+    def search_resources(
+        self,
+        compartment_ids: Iterable[str],
+        resource_query: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
         """Discover and normalize resources in the selected compartments."""
 
         client = self._client()
@@ -82,11 +99,8 @@ class OciResourceSearch:
 
         for compartment_id in compartment_ids:
             page: Optional[str] = None
+            query = build_resource_query(compartment_id, resource_query)
             while True:
-                query = (
-                    "query all resources where compartmentId = "
-                    f"'{_escape_query_value(compartment_id)}'"
-                )
                 details = self._structured_search_details(query)
                 response = client.search_resources(details, page=page)
                 for item in self._response_items(response):

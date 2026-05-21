@@ -23,15 +23,7 @@ pip install -e .
 
 ## Usage
 
-```bash
-oci-resource-dashboard scan \
-  --auth instance_principal \
-  --region us-ashburn-1 \
-  --compartment-id ocid1.compartment.oc1..example \
-  --include-subcompartments \
-  --mandatory-tags config/mandatory_tags.example.yaml \
-  --output-dir out
-```
+### Sample Mode
 
 Use sample mode for demos or local validation without OCI access:
 
@@ -41,9 +33,76 @@ oci-resource-dashboard scan \
   --auth instance_principal \
   --region us-ashburn-1 \
   --compartment-id ocid1.compartment.oc1..example \
-  --include-subcompartments \
   --mandatory-tags config/mandatory_tags.example.yaml \
   --output-dir out
+```
+
+### Live Root Compartment Scan
+
+Scan only the provided root compartment:
+
+```bash
+oci-resource-dashboard scan \
+  --auth instance_principal \
+  --region us-ashburn-1 \
+  --compartment-id ocid1.compartment.oc1..example \
+  --mandatory-tags config/mandatory_tags.example.yaml \
+  --output-dir out-real
+```
+
+### Live Subcompartment Scan
+
+Scan the provided compartment and accessible child compartments:
+
+```bash
+oci-resource-dashboard scan \
+  --auth instance_principal \
+  --region ap-mumbai-1 \
+  --compartment-id ocid1.compartment.oc1..example \
+  --include-subcompartments \
+  --mandatory-tags config/mandatory_tags.example.yaml \
+  --output-dir out-real
+```
+
+### Limited Test Scan
+
+Limit processing after discovery while validating output shape:
+
+```bash
+oci-resource-dashboard scan \
+  --auth instance_principal \
+  --region ap-mumbai-1 \
+  --compartment-id ocid1.compartment.oc1..example \
+  --include-subcompartments \
+  --max-resources 100 \
+  --mandatory-tags config/mandatory_tags.example.yaml \
+  --output-dir out-limited
+```
+
+### Custom Resource Search Query
+
+Override the default Resource Search query. Use `{compartment_id}` when the query should remain scoped to each selected compartment:
+
+```bash
+oci-resource-dashboard scan \
+  --auth instance_principal \
+  --region ap-mumbai-1 \
+  --compartment-id ocid1.compartment.oc1..example \
+  --resource-query "query instance resources where compartmentId = '{compartment_id}'" \
+  --mandatory-tags config/mandatory_tags.example.yaml \
+  --output-dir out-instances
+```
+
+You can also provide a broad query when you intentionally do not want the tool to inject compartment scope:
+
+```bash
+oci-resource-dashboard scan \
+  --auth instance_principal \
+  --region ap-mumbai-1 \
+  --compartment-id ocid1.compartment.oc1..example \
+  --resource-query "query bucket resources" \
+  --mandatory-tags config/mandatory_tags.example.yaml \
+  --output-dir out-buckets
 ```
 
 Without `--sample`, the tool authenticates with the OCI SDK, discovers compartments, queries OCI Resource Search, and generates the same CSV and HTML outputs.
