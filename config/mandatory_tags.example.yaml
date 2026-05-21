@@ -1,0 +1,12 @@
+mandatory_tags:
+  - name: owner
+    source: freeform
+    description: Person or team accountable for the resource.
+  - name: cost_center
+    source: defined
+    namespace: Finance
+    key: CostCenter
+    description: Finance cost center used for chargeback.
+  - name: environment
+    source: freeform
+    description: Workload environment such as dev, test, or prod.
