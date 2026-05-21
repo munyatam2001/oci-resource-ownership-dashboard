@@ -7,6 +7,8 @@ from rich.console import Console
 from rich.table import Table
 
 from .compliance import load_mandatory_tags
+from .csv_report import write_csv_outputs
+from .resource_search import sample_resources
 
 console = Console()
 
@@ -55,6 +57,8 @@ def scan(
 
     configured_tags = load_mandatory_tags(mandatory_tags)
     output_dir.mkdir(parents=True, exist_ok=True)
+    resources = sample_resources()
+    generated_files = write_csv_outputs(resources, configured_tags, output_dir)
 
     table = Table(title="OCI Resource Dashboard Scan Plan")
     table.add_column("Setting", style="bold")
@@ -67,8 +71,16 @@ def scan(
     table.add_row("Mandatory Tags Loaded", str(len(configured_tags)))
     table.add_row("Output Directory", str(output_dir))
     table.add_row("OCI API Calls", "not implemented in this phase")
+    table.add_row("Sample Resources Evaluated", str(len(resources)))
 
     console.print(table)
+
+    files_table = Table(title="Generated CSV Files")
+    files_table.add_column("File", style="bold")
+    files_table.add_column("Path")
+    for generated_file in generated_files:
+        files_table.add_row(generated_file.name, str(generated_file))
+    console.print(files_table)
 
 
 if __name__ == "__main__":

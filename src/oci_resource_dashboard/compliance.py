@@ -2,7 +2,7 @@
 
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
 
 import yaml
 
@@ -10,10 +10,11 @@ from .models import ComplianceResult, ComplianceSummary, MandatoryTag, ResourceR
 from .tag_extractors import ResourceLike, extract_tag_value
 
 
-def load_mandatory_tags(path: Path) -> list[MandatoryTag]:
+def load_mandatory_tags(path: Union[str, Path]) -> list[MandatoryTag]:
     """Load mandatory tag definitions from YAML."""
 
-    with path.open("r", encoding="utf-8") as config_file:
+    config_path = Path(path)
+    with config_path.open("r", encoding="utf-8") as config_file:
         data = yaml.safe_load(config_file) or {}
 
     raw_tags = data.get("mandatory_tags", [])
