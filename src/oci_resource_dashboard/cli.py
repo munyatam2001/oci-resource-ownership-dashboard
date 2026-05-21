@@ -7,7 +7,12 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from .scanner import scan_resources, scan_summary_rows
+from .scanner import (
+    scan_resources,
+    scan_summary_rows,
+    upload_scan_outputs,
+    validate_upload_options,
+)
 
 console = Console()
 
@@ -20,6 +25,17 @@ def _validate_positive_integer(
     if value is not None and value <= 0:
         raise click.BadParameter("must be greater than zero")
     return value
+
+
+def _validate_upload_options(
+    upload: bool,
+    bucket_name: Optional[str],
+    namespace: Optional[str],
+) -> None:
+    try:
+        validate_upload_options(upload, bucket_name, namespace)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
 
 
 @click.group()
@@ -72,6 +88,15 @@ def main() -> None:
         "when the query should remain compartment-scoped."
     ),
 )
+@click.option("--upload", is_flag=True, help="Upload generated files to Object Storage.")
+@click.option("--bucket-name", help="Object Storage bucket name for uploads.")
+@click.option("--namespace", help="Object Storage namespace for uploads.")
+@click.option("--object-prefix", help="Optional Object Storage object name prefix.")
+@click.option(
+    "--upload-html-only",
+    is_flag=True,
+    help="Upload only oci_resource_ownership_dashboard.html.",
+)
 def scan(
     auth_method: str,
     region: str,
@@ -82,8 +107,15 @@ def scan(
     sample: bool,
     max_resources: Optional[int],
     resource_query: Optional[str],
+    upload: bool,
+    bucket_name: Optional[str],
+    namespace: Optional[str],
+    object_prefix: Optional[str],
+    upload_html_only: bool,
 ) -> None:
     """Generate tag-based OCI resource ownership reports."""
+
+    _validate_upload_options(upload, bucket_name, namespace)
 
     result = scan_resources(
         auth_method=auth_method,
@@ -97,6 +129,19 @@ def scan(
         resource_query=resource_query,
         console=console,
     )
+
+    uploaded_objects = []
+    if upload:
+        uploaded_objects = upload_scan_outputs(
+            result=result,
+            auth_method=auth_method,
+            region=region,
+            bucket_name=bucket_name or "",
+            namespace=namespace or "",
+            object_prefix=object_prefix,
+            upload_html_only=upload_html_only,
+            console=console,
+        )
 
     table = Table(title="OCI Resource Dashboard Scan Summary")
     table.add_column("Setting", style="bold")
@@ -118,6 +163,13 @@ def scan(
     for generated_file in result.generated_files:
         files_table.add_row(generated_file.name, str(generated_file))
     console.print(files_table)
+
+    if upload:
+        upload_table = Table(title="Uploaded Object Storage Objects")
+        upload_table.add_column("Object Name", style="bold")
+        for object_name in uploaded_objects:
+            upload_table.add_row(object_name)
+        console.print(upload_table)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ from .compartments import OciCompartmentDiscovery
 from .compliance import load_mandatory_tags
 from .csv_report import write_csv_outputs
 from .html_report import write_html_dashboard
+from .object_storage import upload_generated_files
 from .resource_search import (
     DEFAULT_RESOURCE_QUERY,
     OciResourceSearch,
@@ -33,6 +34,7 @@ class ScanResult:
     resource_query: str
     elapsed_seconds: float
     generated_files: list[Path]
+    auth_context: Optional[Any] = None
 
     @property
     def elapsed_text(self) -> str:
@@ -51,6 +53,19 @@ def _log(console: Any, message: str) -> None:
 def _validate_max_resources(max_resources: Optional[int]) -> None:
     if max_resources is not None and max_resources <= 0:
         raise ValueError("--max-resources must be greater than zero")
+
+
+def validate_upload_options(
+    upload: bool,
+    bucket_name: Optional[str],
+    namespace: Optional[str],
+) -> None:
+    """Validate Object Storage upload options."""
+
+    if upload and not bucket_name:
+        raise ValueError("--bucket-name is required when --upload is set")
+    if upload and not namespace:
+        raise ValueError("--namespace is required when --upload is set")
 
 
 def _limit_resources(
@@ -80,6 +95,7 @@ def scan_resources(
     active_console = console or _NullConsole()
     started = perf_counter()
     query_used = resource_query or DEFAULT_RESOURCE_QUERY
+    auth_context = None
 
     _log(active_console, "Loading mandatory tag configuration")
     configured_tags = load_mandatory_tags(mandatory_tags_path)
@@ -145,6 +161,35 @@ def scan_resources(
         resource_query=query_used,
         elapsed_seconds=elapsed,
         generated_files=generated_files,
+        auth_context=auth_context,
+    )
+
+
+def upload_scan_outputs(
+    result: ScanResult,
+    auth_method: str,
+    region: str,
+    bucket_name: str,
+    namespace: str,
+    object_prefix: Optional[str] = None,
+    upload_html_only: bool = False,
+    console: Optional[Any] = None,
+) -> list[str]:
+    """Upload generated scan outputs to OCI Object Storage."""
+
+    active_console = console or _NullConsole()
+    auth_context = result.auth_context
+    if auth_context is None:
+        _log(active_console, "Authenticating to OCI for Object Storage upload")
+        auth_context = build_auth_context(AuthSettings(method=auth_method, region=region))
+    _log(active_console, "Uploading generated files to Object Storage")
+    return upload_generated_files(
+        auth_context=auth_context,
+        files=result.generated_files,
+        bucket_name=bucket_name,
+        namespace=namespace,
+        object_prefix=object_prefix,
+        upload_html_only=upload_html_only,
     )
 
 

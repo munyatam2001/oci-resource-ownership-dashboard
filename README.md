@@ -107,6 +107,40 @@ oci-resource-dashboard scan \
 
 Without `--sample`, the tool authenticates with the OCI SDK, discovers compartments, queries OCI Resource Search, and generates the same CSV and HTML outputs.
 
+### Upload Reports To Object Storage
+
+Generate reports locally and upload all generated CSV and HTML files:
+
+```bash
+oci-resource-dashboard scan \
+  --auth instance_principal \
+  --region ap-mumbai-1 \
+  --compartment-id ocid1.compartment.oc1..example \
+  --include-subcompartments \
+  --mandatory-tags config/mandatory_tags.example.yaml \
+  --output-dir out-real \
+  --upload \
+  --namespace <object-storage-namespace> \
+  --bucket-name <bucket-name> \
+  --object-prefix resource-ownership/latest
+```
+
+Upload only the static dashboard HTML:
+
+```bash
+oci-resource-dashboard scan \
+  --sample \
+  --auth instance_principal \
+  --region us-ashburn-1 \
+  --compartment-id ocid1.compartment.oc1..example \
+  --mandatory-tags config/mandatory_tags.example.yaml \
+  --output-dir out \
+  --upload \
+  --namespace <object-storage-namespace> \
+  --bucket-name <bucket-name> \
+  --upload-html-only
+```
+
 ## Instance Principal IAM
 
 For an OCI VM, create a dynamic group matching the instance and grant read-only discovery permissions, for example:

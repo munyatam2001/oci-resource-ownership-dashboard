@@ -7,7 +7,11 @@ import pytest
 from oci_resource_dashboard.auth import OciAuthContext
 from oci_resource_dashboard.compartments import CompartmentDiscoveryResult
 from oci_resource_dashboard.resource_search import sample_resources
-from oci_resource_dashboard.scanner import scan_resources, scan_summary_rows
+from oci_resource_dashboard.scanner import (
+    scan_resources,
+    scan_summary_rows,
+    validate_upload_options,
+)
 
 
 CONFIG_PATH = Path("config/mandatory_tags.example.yaml")
@@ -109,6 +113,16 @@ def test_invalid_max_resources_value(tmp_path):
         )
 
 
+def test_upload_validation_requires_bucket_name():
+    with pytest.raises(ValueError, match="bucket-name"):
+        validate_upload_options(upload=True, bucket_name=None, namespace="ns")
+
+
+def test_upload_validation_requires_namespace():
+    with pytest.raises(ValueError, match="namespace"):
+        validate_upload_options(upload=True, bucket_name="reports", namespace=None)
+
+
 def test_resource_query_propagates_into_resource_search(monkeypatch, tmp_path):
     captured = SimpleNamespace(query=None)
 
@@ -195,3 +209,52 @@ def test_tag_diagnostics_still_work_when_max_resources_is_used(tmp_path):
     assert "Owner" in keys
     assert "Operations.CreatedBy" in keys
     assert "created_by" not in keys
+
+
+def test_upload_scan_outputs_reuses_existing_auth_context(monkeypatch, tmp_path):
+    from oci_resource_dashboard.scanner import ScanResult, upload_scan_outputs
+
+    uploaded_contexts = []
+
+    def fake_upload_generated_files(
+        auth_context,
+        files,
+        bucket_name,
+        namespace,
+        object_prefix=None,
+        upload_html_only=False,
+    ):
+        uploaded_contexts.append(auth_context)
+        return ["dashboard/index.html"]
+
+    monkeypatch.setattr(
+        "oci_resource_dashboard.scanner.upload_generated_files",
+        fake_upload_generated_files,
+    )
+
+    auth_context = OciAuthContext(config={"region": "us-ashburn-1"})
+    result = ScanResult(
+        mode="live OCI",
+        compartments_selected=1,
+        total_resources_discovered=0,
+        resources_processed=0,
+        max_resources=None,
+        resource_query="query all resources",
+        elapsed_seconds=0.1,
+        generated_files=[],
+        auth_context=auth_context,
+    )
+
+    uploaded = upload_scan_outputs(
+        result=result,
+        auth_method="instance_principal",
+        region="us-ashburn-1",
+        bucket_name="reports",
+        namespace="ns",
+        object_prefix="dashboard",
+        upload_html_only=True,
+        console=FakeConsole(),
+    )
+
+    assert uploaded == ["dashboard/index.html"]
+    assert uploaded_contexts == [auth_context]
