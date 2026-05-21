@@ -9,6 +9,7 @@ from typing import Any, Mapping, Optional
 from .compliance import evaluate_resource_compliance, summarize_compliance
 from .csv_report import build_inventory_row
 from .models import MandatoryTag
+from .tag_diagnostics import collect_tag_usage, find_mapping_hints
 
 
 HTML_FILENAME = "oci_resource_ownership_dashboard.html"
@@ -116,6 +117,27 @@ def _render_dashboard_html(
             _fmt_percent(float(row["compliance_percent"])),
         ]
         for row in inventory_rows
+    ]
+    tag_usage = collect_tag_usage(resources)
+    tag_usage_rows = [
+        [
+            usage.tag_type,
+            usage.tag_key,
+            usage.resources_with_key,
+            usage.resources_with_nonempty_value,
+            "; ".join(usage.example_values),
+        ]
+        for usage in tag_usage
+    ]
+    mapping_hint_rows = [
+        [
+            row["mandatory_tag"],
+            row["candidate_existing_key"],
+            row["tag_type"],
+            row["resources_with_key"],
+            row["example_values"].replace(";", "; "),
+        ]
+        for row in find_mapping_hints(tag_usage)
     ]
 
     generated_text = generated_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -258,6 +280,14 @@ def _render_dashboard_html(
     <section class="panel">
       <h2>Resources Missing Mandatory Tags</h2>
       {_table(["Resource Name", "Type", "Compartment Name", "Lifecycle State", "Owner", "Created By", "Missing Tags", "Shortened OCID"], missing_resource_rows) if missing_resource_rows else '<div class="empty">No resources are missing mandatory tags.</div>'}
+    </section>
+    <section class="panel">
+      <h2>Existing Tag Usage</h2>
+      {_table(["Tag Type", "Tag Key", "Resources With Key", "Non-Empty Values", "Example Values"], tag_usage_rows) if tag_usage_rows else '<div class="empty">No tags were found on the scanned resources.</div>'}
+    </section>
+    <section class="panel">
+      <h2>Potential Mapping Hints</h2>
+      {_table(["Mandatory Tag", "Candidate Existing Key", "Tag Type", "Resources With Key", "Example Values"], mapping_hint_rows) if mapping_hint_rows else '<div class="empty">No likely mapping hints were found.</div>'}
     </section>
     <section class="panel">
       <h2>Full Resource Inventory</h2>

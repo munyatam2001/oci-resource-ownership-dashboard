@@ -76,3 +76,17 @@ def test_compartment_grouping_handles_missing_owner_as_unknown(tmp_path):
     by_group = {row["group"]: row for row in rows}
 
     assert by_group["Unknown"]["total_resources"] == "1"
+
+
+def test_tag_diagnostic_csvs_are_written(tmp_path):
+    tags = load_mandatory_tags("config/mandatory_tags.example.yaml")
+    paths = write_csv_outputs(sample_resources(), tags, tmp_path)
+
+    assert tmp_path / "oci_tag_key_usage.csv" in paths
+    assert tmp_path / "oci_tag_mapping_hints.csv" in paths
+
+    usage_rows = _read_csv(tmp_path / "oci_tag_key_usage.csv")
+    hint_rows = _read_csv(tmp_path / "oci_tag_mapping_hints.csv")
+
+    assert any(row["tag_key"] == "Owner" for row in usage_rows)
+    assert any(row["mandatory_tag"] == "Owner" for row in hint_rows)

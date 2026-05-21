@@ -52,6 +52,14 @@ def test_dashboard_contains_sample_resource_names(tmp_path):
     assert "legacy-vcn" in html
 
 
+def test_dashboard_contains_existing_tag_usage_section(tmp_path):
+    html = _render_dashboard(tmp_path).read_text(encoding="utf-8")
+
+    assert "Existing Tag Usage" in html
+    assert "Potential Mapping Hints" in html
+    assert "Operations.CreatedBy" in html
+
+
 def test_dashboard_uses_no_external_cdn_references(tmp_path):
     html = _render_dashboard(tmp_path).read_text(encoding="utf-8").lower()
 

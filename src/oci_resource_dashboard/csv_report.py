@@ -8,6 +8,7 @@ from typing import Any, Mapping
 
 from .compliance import evaluate_resource_compliance, summarize_compliance
 from .models import MandatoryTag
+from .tag_diagnostics import collect_tag_usage, find_mapping_hints, tag_usage_rows
 
 
 INVENTORY_HEADERS = [
@@ -47,12 +48,32 @@ GROUP_HEADERS = [
 ]
 
 
+TAG_USAGE_HEADERS = [
+    "tag_type",
+    "tag_key",
+    "resources_with_key",
+    "resources_with_nonempty_value",
+    "example_values",
+]
+
+
+MAPPING_HINT_HEADERS = [
+    "mandatory_tag",
+    "candidate_existing_key",
+    "tag_type",
+    "resources_with_key",
+    "example_values",
+]
+
+
 CSV_FILENAMES = {
     "inventory": "oci_resources_with_tags.csv",
     "missing": "oci_resources_missing_mandatory_tags.csv",
     "summary": "oci_tag_compliance_summary.csv",
     "by_owner": "oci_tag_compliance_by_owner.csv",
     "by_compartment": "oci_tag_compliance_by_compartment.csv",
+    "tag_usage": "oci_tag_key_usage.csv",
+    "mapping_hints": "oci_tag_mapping_hints.csv",
 }
 
 
@@ -170,5 +191,8 @@ def write_csv_outputs(
         GROUP_HEADERS,
         _group_summary_rows(resource_list, tags, "compartment"),
     )
+    usage = collect_tag_usage(resource_list)
+    _write_rows(paths["tag_usage"], TAG_USAGE_HEADERS, tag_usage_rows(usage))
+    _write_rows(paths["mapping_hints"], MAPPING_HINT_HEADERS, find_mapping_hints(usage))
 
     return [paths[name] for name in CSV_FILENAMES]
