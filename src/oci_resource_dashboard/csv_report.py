@@ -9,6 +9,7 @@ from typing import Any, Mapping
 from .compliance import evaluate_resource_compliance, summarize_compliance
 from .models import MandatoryTag
 from .tag_diagnostics import collect_tag_usage, find_mapping_hints, tag_usage_rows
+from .tag_extractors import extract_no_shutdown, extract_oracle_created_on
 
 
 INVENTORY_BASE_HEADERS = [
@@ -24,6 +25,8 @@ INVENTORY_BASE_HEADERS = [
 
 
 INVENTORY_TRAILING_HEADERS = [
+    "OracleCreatedOn",
+    "NoShutDown",
     "missing_tags",
     "compliance_percent",
     "is_compliant",
@@ -119,6 +122,8 @@ def build_inventory_row(
         "compartment_name": _resource_value(resource, "compartment_name"),
         "region": _resource_value(resource, "region"),
         "time_created": _resource_value(resource, "time_created"),
+        "OracleCreatedOn": extract_oracle_created_on(resource) or "",
+        "NoShutDown": extract_no_shutdown(resource) or "",
         "missing_tags": ";".join(result.missing_tags),
         "compliance_percent": result.compliance_percent,
         "is_compliant": str(result.is_compliant).lower(),

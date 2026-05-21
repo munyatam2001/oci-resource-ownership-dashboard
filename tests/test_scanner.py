@@ -233,7 +233,8 @@ def test_tag_diagnostics_still_work_when_max_resources_is_used(tmp_path):
     keys = {row["tag_key"] for row in usage_rows}
 
     assert "Owner" in keys
-    assert "Operations.CreatedBy" in keys
+    assert "Oracle-Tags.CreatedBy" in keys
+    assert "Oracle-Tags.CreatedOn" in keys
     assert "created_by" not in keys
 
 

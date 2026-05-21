@@ -1,5 +1,7 @@
 from oci_resource_dashboard.models import MandatoryTag
 from oci_resource_dashboard.tag_extractors import (
+    extract_no_shutdown,
+    extract_oracle_created_on,
     extract_defined_tag,
     extract_freeform_tag,
     extract_tag_value,
@@ -51,6 +53,34 @@ def test_extracts_tag_value_from_flattened_defined_alias():
     resource = {"freeform_tags": {"Operations.CreatedBy": "bob@example.com"}}
 
     assert extract_tag_value(resource, CREATED_BY) == "bob@example.com"
+
+
+def test_oracle_tags_created_by_defined_tag_is_created_by_alias():
+    resource = {
+        "defined_tags": {
+            "Oracle-Tags": {"CreatedBy": "oracleidentitycloudservice/alice@example.com"}
+        }
+    }
+    tag = MandatoryTag(
+        canonical_name="CreatedBy",
+        defined_tag_namespace="Operations",
+        defined_tag_key="CreatedBy",
+        aliases=("Oracle-Tags.CreatedBy",),
+    )
+
+    assert extract_tag_value(resource, tag) == "oracleidentitycloudservice/alice@example.com"
+
+
+def test_extracts_oracle_created_on_metadata():
+    resource = {"defined_tags": {"Oracle-Tags": {"CreatedOn": "2026-05-21T10:00:00Z"}}}
+
+    assert extract_oracle_created_on(resource) == "2026-05-21T10:00:00Z"
+
+
+def test_extracts_no_shutdown_metadata():
+    resource = {"freeform_tags": {"NoShutDown": "Yes"}}
+
+    assert extract_no_shutdown(resource) == "Yes"
 
 
 def test_extracts_case_insensitive_freeform_tag_keys():

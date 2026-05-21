@@ -33,6 +33,8 @@ def test_dashboard_contains_summary_metrics(tmp_path):
     assert "60%" in html
     assert "Resources with CreatedBy" in html
     assert "Resources with Owner" in html
+    assert "Resources with NoShutDown" in html
+    assert "Resources with Oracle CreatedOn" in html
     assert "Unique Owners" in html
     assert "Unique Creators" in html
 
@@ -70,6 +72,47 @@ def test_dashboard_contains_compliance_progress_indicator(tmp_path):
     assert "Ownership Compliance Progress" in html
     assert "progress-track" in html
     assert "aria-label=\"60% compliant\"" in html
+
+
+def test_dashboard_contains_filter_toolbar_controls(tmp_path):
+    html = _render_dashboard(tmp_path).read_text(encoding="utf-8")
+
+    assert "inventoryFilters" in html
+    assert "inventoryResourceType" in html
+    assert "inventoryCompartment" in html
+    assert "inventoryCompliance" in html
+    assert "inventoryMissingTag" in html
+    assert "inventoryNoShutDown" in html
+    assert "inventoryCreatedFrom" in html
+    assert "inventoryCreatedTo" in html
+    assert "inventoryClearFilters" in html
+    assert "inventoryRowCount" in html
+
+
+def test_dashboard_contains_missing_table_filters_and_quick_chips(tmp_path):
+    html = _render_dashboard(tmp_path).read_text(encoding="utf-8")
+
+    assert "missingFilters" in html
+    assert "missingResourceType" in html
+    assert "missingCompartment" in html
+    assert "missingMissingTag" in html
+    assert "missingNoShutDown" in html
+    assert "missingClearFilters" in html
+    assert "missingRowCount" in html
+    assert "Missing Owner" in html
+    assert "Missing CreatedBy" in html
+    assert "Has CreatedBy" in html
+    assert "NoShutDown = Yes" in html
+    assert "Created in last 30 days" in html
+    assert "Inactive resources" in html
+
+
+def test_dashboard_contains_operational_insights(tmp_path):
+    html = _render_dashboard(tmp_path).read_text(encoding="utf-8")
+
+    assert "Oracle-Tags.CreatedBy is being used as the CreatedBy ownership signal." in html
+    assert "NoShutDown is present on 1 resources." in html
+    assert "Oracle-Tags.CreatedOn is available for creation-date analysis." in html
 
 
 def test_dashboard_uses_no_external_cdn_references(tmp_path):

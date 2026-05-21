@@ -21,6 +21,8 @@ def test_inventory_csv_headers(tmp_path):
         headers = next(reader)
 
     assert headers == INVENTORY_HEADERS
+    assert "OracleCreatedOn" in headers
+    assert "NoShutDown" in headers
     assert "CostCenter" not in headers
     assert "Environment" not in headers
     assert "Application" not in headers
@@ -41,6 +43,10 @@ def test_missing_tags_csv_only_includes_noncompliant_resources(tmp_path):
     assert all("CostCenter" not in row["missing_tags"] for row in rows)
     assert all("Environment" not in row["missing_tags"] for row in rows)
     assert all("Application" not in row["missing_tags"] for row in rows)
+    assert all(
+        set(row["missing_tags"].split(";")).issubset({"CreatedBy", "Owner"})
+        for row in rows
+    )
 
 
 def test_summary_csv_contains_expected_totals(tmp_path):

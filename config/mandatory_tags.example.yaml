@@ -3,10 +3,11 @@ mandatory_tags:
     defined_tag_namespace: Operations
     defined_tag_key: CreatedBy
     aliases:
-      - created_by
-      - creator
-      - createdby
+      - CreatedBy
       - Oracle-Tags.CreatedBy
+      - created_by
+      - createdby
+      - creator
   - canonical_name: Owner
     defined_tag_namespace: Operations
     defined_tag_key: Owner

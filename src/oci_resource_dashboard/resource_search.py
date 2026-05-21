@@ -183,14 +183,17 @@ def sample_resources() -> list[dict[str, Any]]:
             "region": "us-ashburn-1",
             "time_created": "2026-05-01T10:15:00Z",
             "defined_tags": {
+                "Oracle-Tags": {
+                    "CreatedBy": "oracleidentitycloudservice/alice@example.com",
+                    "CreatedOn": "2026-05-01T10:15:00Z",
+                },
                 "Operations": {
-                    "CreatedBy": "alice@example.com",
                     "Environment": "prod",
                     "Application": "payments",
                 },
                 "Finance": {"CostCenter": "CC-1001"},
             },
-            "freeform_tags": {"Owner": "platform-team"},
+            "freeform_tags": {"Owner": "platform-team", "NoShutDown": "Yes"},
         },
         {
             "resource_name": "prod-app-subnet",
@@ -202,6 +205,7 @@ def sample_resources() -> list[dict[str, Any]]:
             "region": "us-ashburn-1",
             "time_created": "2026-05-02T08:30:00Z",
             "defined_tags": {
+                "Oracle-Tags": {"CreatedOn": "2026-05-02T08:30:00Z"},
                 "Operations": {
                     "CreatedBy": "bob@example.com",
                     "Owner": "network-team",
@@ -221,8 +225,8 @@ def sample_resources() -> list[dict[str, Any]]:
             "region": "us-ashburn-1",
             "time_created": "2026-05-03T12:00:00Z",
             "defined_tags": {
+                "Oracle-Tags": {"CreatedBy": "oracleidentitycloudservice/carol@example.com"},
                 "Operations": {
-                    "CreatedBy": "carol@example.com",
                     "Environment": "prod",
                 },
                 "Finance": {"CostCenter": "CC-2002"},

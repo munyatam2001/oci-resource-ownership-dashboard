@@ -13,6 +13,7 @@ from .tag_diagnostics import collect_tag_usage, find_mapping_hints
 
 
 HTML_FILENAME = "oci_resource_ownership_dashboard.html"
+DISPLAY_ROW_LIMIT = 500
 
 
 def _short_ocid(value: Any) -> str:
@@ -76,6 +77,100 @@ def _table(
     return f"<table{id_attr}><thead><tr>{thead}</tr></thead><tbody>{tbody}</tbody></table>"
 
 
+def _select_options(values: Iterable[str]) -> str:
+    options = ['<option value="">All</option>']
+    for value in sorted({str(item) for item in values if str(item)}):
+        options.append(f'<option value="{escape(value)}">{escape(value)}</option>')
+    return "".join(options)
+
+
+def _filter_toolbar(
+    prefix: str,
+    resource_types: Iterable[str],
+    compartments: Iterable[str],
+    states: Iterable[str],
+    created_by_values: Iterable[str],
+    owner_values: Iterable[str],
+    include_dates: bool,
+) -> str:
+    date_controls = ""
+    if include_dates:
+        date_controls = f"""
+          <label>CreatedOn From<input id="{prefix}CreatedFrom" data-filter="{prefix}" data-field="createdonFrom" type="date"></label>
+          <label>CreatedOn To<input id="{prefix}CreatedTo" data-filter="{prefix}" data-field="createdonTo" type="date"></label>
+        """
+    compliance_control = ""
+    if prefix == "inventory":
+        compliance_control = f"""
+          <label>Compliance
+            <select id="{prefix}Compliance" data-filter="{prefix}" data-field="compliance">
+              <option value="">All</option>
+              <option value="compliant">Compliant</option>
+              <option value="non-compliant">Non-Compliant</option>
+            </select>
+          </label>
+        """
+    return f"""
+      <div class="filter-toolbar" id="{prefix}Filters">
+        <label>Search<input id="{prefix}Search" data-filter="{prefix}" data-field="search" type="search" placeholder="Search rows"></label>
+        <label>Resource Type<select id="{prefix}ResourceType" data-filter="{prefix}" data-field="type">{_select_options(resource_types)}</select></label>
+        <label>Compartment<select id="{prefix}Compartment" data-filter="{prefix}" data-field="compartment">{_select_options(compartments)}</select></label>
+        <label>Lifecycle State<select id="{prefix}State" data-filter="{prefix}" data-field="state">{_select_options(states)}</select></label>
+        {compliance_control}
+        <label>Missing Tag
+          <select id="{prefix}MissingTag" data-filter="{prefix}" data-field="missing">
+            <option value="">All</option>
+            <option value="CreatedBy">CreatedBy</option>
+            <option value="Owner">Owner</option>
+          </select>
+        </label>
+        <label>CreatedBy<select id="{prefix}CreatedBy" data-filter="{prefix}" data-field="createdby">{_select_options(created_by_values)}</select></label>
+        <label>Owner<select id="{prefix}Owner" data-filter="{prefix}" data-field="owner">{_select_options(owner_values)}</select></label>
+        <label>NoShutDown
+          <select id="{prefix}NoShutDown" data-filter="{prefix}" data-field="noshutdown">
+            <option value="">All</option>
+            <option value="yes">Yes</option>
+            <option value="blank">No/Blank</option>
+          </select>
+        </label>
+        {date_controls}
+        <button type="button" id="{prefix}ClearFilters" data-clear="{prefix}">Clear Filters</button>
+        <span class="row-count" id="{prefix}RowCount">Showing 0 of 0 rows</span>
+      </div>
+    """
+
+
+def _row_attrs(row: Mapping[str, Any]) -> str:
+    status = "compliant" if row["is_compliant"] == "true" else "non-compliant"
+    created_on = str(row.get("OracleCreatedOn") or "")
+    created_date = created_on[:10] if len(created_on) >= 10 else ""
+    values = {
+        "type": row["resource_type"],
+        "compartment": row["compartment_name"],
+        "state": row["lifecycle_state"],
+        "compliance": status,
+        "missing": row["missing_tags"],
+        "createdby": row.get("CreatedBy") or "",
+        "owner": row.get("Owner") or "",
+        "noshutdown": "yes" if str(row.get("NoShutDown") or "").casefold() == "yes" else "blank",
+        "createdon": created_date,
+    }
+    return " ".join(f'data-{key}="{escape(str(value))}"' for key, value in values.items())
+
+
+def _raw_table_with_attrs(
+    headers: list[str],
+    rows: list[tuple[Mapping[str, Any], list[Any]]],
+    table_id: str,
+) -> str:
+    thead = "".join(f"<th>{escape(header)}</th>" for header in headers)
+    body_rows = []
+    for row_data, cells in rows:
+        rendered = "".join(f"<td>{cell}</td>" for cell in cells)
+        body_rows.append(f'<tr {_row_attrs(row_data)}>{rendered}</tr>')
+    return f'<table id="{escape(table_id)}"><thead><tr>{thead}</tr></thead><tbody>{"".join(body_rows)}</tbody></table>'
+
+
 def _state_badge(state: str) -> str:
     normalized = state.upper()
     if normalized in {"RUNNING", "ACTIVE", "AVAILABLE"}:
@@ -97,6 +192,9 @@ def _insights(
     summary_missing: dict[str, int],
     total_resources: int,
     mapping_hint_rows: list[dict[str, Any]],
+    no_shutdown_count: int,
+    oracle_created_on_count: int,
+    oracle_created_by_mapped: bool,
 ) -> list[str]:
     insights: list[str] = []
     if summary_missing:
@@ -104,25 +202,14 @@ def _insights(
         if missing_count:
             insights.append(f"Most resources are missing {tag}: {missing_count} of {total_resources}.")
 
-    created_by_hints = [
-        row for row in mapping_hint_rows if row["mandatory_tag"] == "CreatedBy"
-    ]
-    if created_by_hints:
-        oracle_hint = next(
-            (
-                row
-                for row in created_by_hints
-                if row["candidate_existing_key"] == "Oracle-Tags.CreatedBy"
-            ),
-            None,
-        )
-        top_hint = oracle_hint or max(
-            created_by_hints,
-            key=lambda row: int(row["resources_with_key"]),
-        )
-        insights.append(
-            f"CreatedBy appears in existing tags such as {top_hint['candidate_existing_key']}."
-        )
+    if oracle_created_by_mapped:
+        insights.append("Oracle-Tags.CreatedBy is being used as the CreatedBy ownership signal.")
+
+    if no_shutdown_count:
+        insights.append(f"NoShutDown is present on {no_shutdown_count} resources.")
+
+    if oracle_created_on_count:
+        insights.append("Oracle-Tags.CreatedOn is available for creation-date analysis.")
 
     if mapping_hint_rows:
         insights.append("Use Potential Mapping Hints to update tag aliases.")
@@ -146,6 +233,8 @@ def _render_dashboard_html(
 
     resources_with_created_by = summary.present_count_by_tag.get("CreatedBy", 0)
     resources_with_owner = summary.present_count_by_tag.get("Owner", 0)
+    resources_with_no_shutdown = sum(1 for row in inventory_rows if row.get("NoShutDown"))
+    resources_with_oracle_created_on = sum(1 for row in inventory_rows if row.get("OracleCreatedOn"))
     unique_owners = {
         str(result.present_tags["Owner"])
         for result in evaluated
@@ -173,23 +262,25 @@ def _render_dashboard_html(
             ]
         )
 
-    missing_resource_rows = []
+    missing_resource_rows: list[tuple[Mapping[str, Any], list[Any]]] = []
     for row in inventory_rows:
         if row["is_compliant"] == "false":
             missing_resource_rows.append(
-                [
+                (row, [
                     _title_cell(row["resource_name"]),
                     _title_cell(row["resource_type"], "compact"),
                     _title_cell(row["compartment_name"]),
                     _state_badge(row["lifecycle_state"]),
-                    _title_cell(row.get("Owner") or "Unknown"),
                     _title_cell(row.get("CreatedBy") or "Unknown"),
+                    _title_cell(row.get("Owner") or "Unknown"),
+                    _title_cell(row.get("OracleCreatedOn") or "Unknown"),
+                    _badge(row.get("NoShutDown") or "No/Blank", "tag" if row.get("NoShutDown") else "neutral"),
                     _tag_badges(row["missing_tags"]),
                     _short_title_cell(row["resource_id"]),
-                ]
+                ])
             )
 
-    full_inventory_rows = []
+    full_inventory_rows: list[tuple[Mapping[str, Any], list[Any]]] = []
     for row in inventory_rows:
         resource_cells = [
             _title_cell(row["resource_name"]),
@@ -199,11 +290,13 @@ def _render_dashboard_html(
         ]
         tag_cells = [_title_cell(row.get(tag_name) or "Unknown") for tag_name in tag_names]
         full_inventory_rows.append(
-            [
+            (row, [
                 *resource_cells,
                 *tag_cells,
+                _title_cell(row.get("OracleCreatedOn") or "Unknown"),
+                _badge(row.get("NoShutDown") or "No/Blank", "tag" if row.get("NoShutDown") else "neutral"),
                 _compliance_badge(float(row["compliance_percent"])),
-            ]
+            ])
         )
 
     tag_usage = collect_tag_usage(resources)
@@ -218,6 +311,11 @@ def _render_dashboard_html(
         for usage in tag_usage
     ]
     mapping_hint_data = find_mapping_hints(tag_usage)
+    oracle_created_by_mapped = any(
+        row["mandatory_tag"] == "CreatedBy"
+        and row["candidate_existing_key"] == "Oracle-Tags.CreatedBy"
+        for row in mapping_hint_data
+    )
     mapping_hint_rows = [
         [
             _badge(row["mandatory_tag"], "tag"),
@@ -238,13 +336,33 @@ def _render_dashboard_html(
             _metric_card("Compliance %", _fmt_percent(summary.compliance_percent), "Mandatory ownership coverage"),
             _metric_card("Resources with CreatedBy", resources_with_created_by, "Tag-derived creator signal"),
             _metric_card("Resources with Owner", resources_with_owner, "Tag-derived owner signal"),
+            _metric_card("Resources with NoShutDown", resources_with_no_shutdown, "Operational shutdown marker"),
+            _metric_card("Resources with Oracle CreatedOn", resources_with_oracle_created_on, "Creation timestamp tag"),
             _metric_card("Unique Owners", len(unique_owners), "Distinct tag-derived owners"),
             _metric_card("Unique Creators", len(unique_creators), "Distinct tag-derived creators"),
         ]
     )
     progress_value = max(0.0, min(100.0, float(summary.compliance_percent)))
-    insight_items = "".join(f"<li>{escape(insight)}</li>" for insight in _insights(summary.missing_count_by_tag, summary.total_resources, mapping_hint_data))
+    insight_items = "".join(
+        f"<li>{escape(insight)}</li>"
+        for insight in _insights(
+            summary.missing_count_by_tag,
+            summary.total_resources,
+            mapping_hint_data,
+            resources_with_no_shutdown,
+            resources_with_oracle_created_on,
+            oracle_created_by_mapped,
+        )
+    )
     mandatory_scope = " and ".join(tag_names) if tag_names else "none"
+    displayed_inventory_rows = full_inventory_rows[:DISPLAY_ROW_LIMIT]
+    displayed_missing_rows = missing_resource_rows[:DISPLAY_ROW_LIMIT]
+    resource_types = [row["resource_type"] for row in inventory_rows]
+    compartments = [row["compartment_name"] for row in inventory_rows]
+    states = [row["lifecycle_state"] for row in inventory_rows]
+    created_by_values = [row.get("CreatedBy", "") for row in inventory_rows]
+    owner_values = [row.get("Owner", "") for row in inventory_rows]
+    has_created_on = resources_with_oracle_created_on > 0
 
     return f"""<!doctype html>
 <html lang="en">
@@ -315,7 +433,7 @@ def _render_dashboard_html(
     }}
     .cards {{
       display: grid;
-      grid-template-columns: repeat(6, minmax(140px, 1fr));
+      grid-template-columns: repeat(5, minmax(140px, 1fr));
       gap: 14px;
     }}
     .metric-card, .panel, .insight-panel {{
@@ -399,6 +517,38 @@ def _render_dashboard_html(
     .insight-panel {{ padding: 18px 20px; background: #fffdf8; border-color: #f0dfb7; }}
     .insight-panel ul {{ margin: 10px 0 0; padding-left: 20px; color: #4b3b18; }}
     .search-row {{ display: flex; justify-content: flex-end; margin-bottom: 12px; }}
+    .filter-toolbar {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 10px;
+      align-items: end;
+      margin-bottom: 12px;
+      padding: 12px;
+      background: var(--surface-soft);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+    }}
+    .filter-toolbar label {{ display: grid; gap: 5px; color: var(--muted); font-size: 12px; font-weight: 700; }}
+    .filter-toolbar input, .filter-toolbar select {{
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 9px 10px;
+      background: #fff;
+      color: var(--text);
+      font-size: 13px;
+    }}
+    .filter-toolbar button, .quick-chip {{
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 9px 12px;
+      background: #fff;
+      color: var(--accent-strong);
+      font-weight: 700;
+      cursor: pointer;
+    }}
+    .row-count {{ color: var(--muted); font-size: 13px; align-self: center; }}
+    .quick-filters {{ display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }}
     input[type="search"] {{
       width: min(420px, 100%);
       border: 1px solid var(--line);
@@ -463,7 +613,9 @@ def _render_dashboard_html(
       <section class="panel">
         <h2>Resources Missing Mandatory Tags</h2>
         <p class="section-copy">Resources below are missing CreatedBy, Owner, or both. OCIDs are shortened visually but available on hover.</p>
-        <div class="table-wrap">{_table(["Resource Name", "Type", "Compartment Name", "Lifecycle State", "Owner", "Created By", "Missing Tags", "Shortened OCID"], missing_resource_rows, raw=True) if missing_resource_rows else '<div class="empty">No resources are missing mandatory tags.</div>'}</div>
+        <p class="section-copy">Table display may be limited; full data is available in CSV exports.</p>
+        {_filter_toolbar("missing", resource_types, compartments, states, created_by_values, owner_values, False)}
+        <div class="table-wrap">{_raw_table_with_attrs(["Resource Name", "Type", "Compartment Name", "Lifecycle State", "CreatedBy", "Owner", "OracleCreatedOn", "NoShutDown", "Missing Tags", "Shortened OCID"], displayed_missing_rows, "missingTable") if missing_resource_rows else '<div class="empty">No resources are missing mandatory tags.</div>'}</div>
       </section>
       <section class="panel">
         <h2>Existing Tag Usage</h2>
@@ -478,23 +630,96 @@ def _render_dashboard_html(
       <section class="panel">
         <h2>Full Resource Inventory</h2>
         <p class="section-copy">Searchable inventory with active mandatory ownership tags and compliance status.</p>
-        <div class="search-row">
-          <input id="inventorySearch" type="search" placeholder="Search inventory">
+        <p class="section-copy">Table display may be limited; full data is available in CSV exports.</p>
+        <div class="quick-filters">
+          <button class="quick-chip" type="button" data-chip="missing-owner">Missing Owner</button>
+          <button class="quick-chip" type="button" data-chip="missing-createdby">Missing CreatedBy</button>
+          <button class="quick-chip" type="button" data-chip="has-createdby">Has CreatedBy</button>
+          <button class="quick-chip" type="button" data-chip="noshutdown-yes">NoShutDown = Yes</button>
+          <button class="quick-chip" type="button" data-chip="created-last-30" {"disabled" if not has_created_on else ""}>Created in last 30 days</button>
+          <button class="quick-chip" type="button" data-chip="inactive">Inactive resources</button>
         </div>
-        <div class="table-wrap">{_table(["Resource", "Type", "Compartment", "State", *tag_names, "Compliance"], full_inventory_rows, "inventoryTable", raw=True)}</div>
+        {_filter_toolbar("inventory", resource_types, compartments, states, created_by_values, owner_values, True)}
+        <div class="table-wrap">{_raw_table_with_attrs(["Resource", "Type", "Compartment", "State", *tag_names, "OracleCreatedOn", "NoShutDown", "Compliance"], displayed_inventory_rows, "inventoryTable")}</div>
       </section>
     </div>
   </main>
   <script>
     (function () {{
-      var search = document.getElementById("inventorySearch");
-      var table = document.getElementById("inventoryTable");
-      if (!search || !table) {{ return; }}
-      var rows = Array.prototype.slice.call(table.querySelectorAll("tbody tr"));
-      search.addEventListener("input", function () {{
-        var needle = search.value.toLowerCase();
+      function value(id) {{
+        var el = document.getElementById(id);
+        return el ? el.value : "";
+      }}
+      function setValue(id, val) {{
+        var el = document.getElementById(id);
+        if (el) {{ el.value = val; }}
+      }}
+      function rowMatches(row, prefix) {{
+        var search = value(prefix + "Search").toLowerCase();
+        if (search && row.textContent.toLowerCase().indexOf(search) === -1) {{ return false; }}
+        var checks = [
+          ["ResourceType", "type"],
+          ["Compartment", "compartment"],
+          ["State", "state"],
+          ["Compliance", "compliance"],
+          ["CreatedBy", "createdby"],
+          ["Owner", "owner"]
+        ];
+        for (var i = 0; i < checks.length; i++) {{
+          var wanted = value(prefix + checks[i][0]);
+          if (wanted && row.dataset[checks[i][1]] !== wanted) {{ return false; }}
+        }}
+        var missing = value(prefix + "MissingTag");
+        if (missing && row.dataset.missing.indexOf(missing) === -1) {{ return false; }}
+        var noShutdown = value(prefix + "NoShutDown");
+        if (noShutdown && row.dataset.noshutdown !== noShutdown) {{ return false; }}
+        var from = value(prefix + "CreatedFrom");
+        var to = value(prefix + "CreatedTo");
+        if (from && (!row.dataset.createdon || row.dataset.createdon < from)) {{ return false; }}
+        if (to && (!row.dataset.createdon || row.dataset.createdon > to)) {{ return false; }}
+        return true;
+      }}
+      function applyFilters(prefix) {{
+        var table = document.getElementById(prefix + "Table");
+        if (!table) {{ return; }}
+        var rows = Array.prototype.slice.call(table.querySelectorAll("tbody tr"));
+        var visible = 0;
         rows.forEach(function (row) {{
-          row.style.display = row.textContent.toLowerCase().indexOf(needle) === -1 ? "none" : "";
+          var match = rowMatches(row, prefix);
+          row.style.display = match ? "" : "none";
+          if (match) {{ visible += 1; }}
+        }});
+        var count = document.getElementById(prefix + "RowCount");
+        if (count) {{ count.textContent = "Showing " + visible + " of " + rows.length + " rows"; }}
+      }}
+      function clearFilters(prefix) {{
+        Array.prototype.slice.call(document.querySelectorAll('[data-filter="' + prefix + '"]')).forEach(function (el) {{ el.value = ""; }});
+        applyFilters(prefix);
+      }}
+      ["inventory", "missing"].forEach(function (prefix) {{
+        Array.prototype.slice.call(document.querySelectorAll('[data-filter="' + prefix + '"]')).forEach(function (el) {{
+          el.addEventListener("input", function () {{ applyFilters(prefix); }});
+          el.addEventListener("change", function () {{ applyFilters(prefix); }});
+        }});
+        var clear = document.querySelector('[data-clear="' + prefix + '"]');
+        if (clear) {{ clear.addEventListener("click", function () {{ clearFilters(prefix); }}); }}
+        applyFilters(prefix);
+      }});
+      Array.prototype.slice.call(document.querySelectorAll("[data-chip]")).forEach(function (chip) {{
+        chip.addEventListener("click", function () {{
+          clearFilters("inventory");
+          var type = chip.dataset.chip;
+          if (type === "missing-owner") {{ setValue("inventoryMissingTag", "Owner"); }}
+          if (type === "missing-createdby") {{ setValue("inventoryMissingTag", "CreatedBy"); }}
+          if (type === "has-createdby") {{ setValue("inventoryMissingTag", ""); setValue("inventoryCreatedBy", value("inventoryCreatedBy")); }}
+          if (type === "noshutdown-yes") {{ setValue("inventoryNoShutDown", "yes"); }}
+          if (type === "created-last-30") {{
+            var today = new Date();
+            var from = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+            setValue("inventoryCreatedFrom", from.toISOString().slice(0, 10));
+          }}
+          if (type === "inactive") {{ setValue("inventoryState", "TERMINATED"); }}
+          applyFilters("inventory");
         }});
       }});
     }})();

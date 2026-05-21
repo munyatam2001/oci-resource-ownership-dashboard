@@ -69,6 +69,16 @@ def _candidate_freeform_keys(mandatory_tag: MandatoryTag) -> list[str]:
     return deduped
 
 
+def _extract_defined_alias(
+    defined_tags: Optional[Mapping[str, Any]],
+    alias: str,
+) -> Optional[Any]:
+    if "." not in alias:
+        return None
+    namespace, key = alias.split(".", 1)
+    return extract_defined_tag(defined_tags, namespace, key)
+
+
 def extract_mandatory_tag_value(
     freeform_tags: Optional[Mapping[str, Any]],
     defined_tags: Optional[Mapping[str, Any]],
@@ -78,6 +88,11 @@ def extract_mandatory_tag_value(
 
     if tag.defined_tag_namespace and tag.defined_tag_key:
         value = extract_defined_tag(defined_tags, tag.defined_tag_namespace, tag.defined_tag_key)
+        if value is not None:
+            return value
+
+    for alias in tag.aliases:
+        value = _extract_defined_alias(defined_tags, alias)
         if value is not None:
             return value
 
@@ -103,3 +118,17 @@ def extract_tag_value(resource: ResourceLike, mandatory_tag: MandatoryTag) -> Op
 
     freeform_tags, defined_tags = _resource_tags(resource)
     return extract_mandatory_tag_value(freeform_tags, defined_tags, mandatory_tag)
+
+
+def extract_oracle_created_on(resource: ResourceLike) -> Optional[Any]:
+    """Return Oracle-Tags.CreatedOn when present as informational metadata."""
+
+    _, defined_tags = _resource_tags(resource)
+    return extract_defined_tag(defined_tags, "Oracle-Tags", "CreatedOn")
+
+
+def extract_no_shutdown(resource: ResourceLike) -> Optional[Any]:
+    """Return NoShutDown freeform tag value when present as operational metadata."""
+
+    freeform_tags, _ = _resource_tags(resource)
+    return extract_freeform_tag(freeform_tags, "NoShutDown")
