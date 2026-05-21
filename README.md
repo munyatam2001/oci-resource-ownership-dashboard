@@ -2,7 +2,7 @@
 
 A professional static HTML dashboard generator for OCI tenancy resource ownership and mandatory tag compliance.
 
-This first project step establishes the repository structure, CLI, configuration format, data models, compliance logic, and report interfaces. It intentionally does not call OCI APIs yet.
+The project generates CSV files and a self-contained static HTML dashboard for OCI resource ownership and mandatory tag compliance.
 
 ## Principles
 
@@ -33,7 +33,32 @@ oci-resource-dashboard scan \
   --output-dir out
 ```
 
-For now, `scan` loads the mandatory tag configuration, creates the output directory, and prints the intended scan settings. OCI discovery will be implemented behind the stub interfaces in a later step.
+Use sample mode for demos or local validation without OCI access:
+
+```bash
+oci-resource-dashboard scan \
+  --sample \
+  --auth instance_principal \
+  --region us-ashburn-1 \
+  --compartment-id ocid1.compartment.oc1..example \
+  --include-subcompartments \
+  --mandatory-tags config/mandatory_tags.example.yaml \
+  --output-dir out
+```
+
+Without `--sample`, the tool authenticates with the OCI SDK, discovers compartments, queries OCI Resource Search, and generates the same CSV and HTML outputs.
+
+## Instance Principal IAM
+
+For an OCI VM, create a dynamic group matching the instance and grant read-only discovery permissions, for example:
+
+```text
+Allow dynamic-group <dashboard-dynamic-group> to inspect compartments in tenancy
+Allow dynamic-group <dashboard-dynamic-group> to inspect all-resources in tenancy
+Allow dynamic-group <dashboard-dynamic-group> to read tag-namespaces in tenancy
+```
+
+Scope these policies to selected compartments where possible.
 
 ## Development
 
