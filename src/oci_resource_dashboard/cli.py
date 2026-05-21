@@ -3,35 +3,12 @@
 from pathlib import Path
 
 import click
-import yaml
 from rich.console import Console
 from rich.table import Table
 
-from .models import MandatoryTag
+from .compliance import load_mandatory_tags
 
 console = Console()
-
-
-def load_mandatory_tags(path: Path) -> list[MandatoryTag]:
-    """Load mandatory tag definitions from YAML."""
-
-    with path.open("r", encoding="utf-8") as config_file:
-        data = yaml.safe_load(config_file) or {}
-
-    tags = data.get("mandatory_tags", [])
-    if not isinstance(tags, list):
-        raise click.ClickException("'mandatory_tags' must be a list")
-
-    mandatory_tags: list[MandatoryTag] = []
-    for raw_tag in tags:
-        if not isinstance(raw_tag, dict):
-            raise click.ClickException("Each mandatory tag must be a mapping")
-        try:
-            mandatory_tags.append(MandatoryTag(**raw_tag))
-        except TypeError as exc:
-            raise click.ClickException(f"Invalid mandatory tag entry: {raw_tag}") from exc
-
-    return mandatory_tags
 
 
 @click.group()

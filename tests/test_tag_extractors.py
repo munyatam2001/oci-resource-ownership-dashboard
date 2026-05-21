@@ -2,36 +2,77 @@ from oci_resource_dashboard.models import MandatoryTag
 from oci_resource_dashboard.tag_extractors import (
     extract_defined_tag,
     extract_freeform_tag,
-    extract_mandatory_tag_value,
+    extract_tag_value,
 )
 
 
-def test_extracts_tag_value_from_freeform_tags():
-    tags = {"owner": "platform-team", "environment": "prod"}
+CREATED_BY = MandatoryTag(
+    canonical_name="CreatedBy",
+    defined_tag_namespace="Operations",
+    defined_tag_key="CreatedBy",
+    aliases=("created_by", "creator"),
+)
+OWNER = MandatoryTag(
+    canonical_name="Owner",
+    defined_tag_namespace="Operations",
+    defined_tag_key="Owner",
+    aliases=("owner", "resource_owner"),
+)
+ENVIRONMENT = MandatoryTag(
+    canonical_name="Environment",
+    defined_tag_namespace="Operations",
+    defined_tag_key="Environment",
+    aliases=("env", "stage"),
+)
 
-    assert extract_freeform_tag(tags, "owner") == "platform-team"
+
+def test_extracts_tag_value_from_defined_tags_first():
+    resource = {
+        "defined_tags": {"Operations": {"CreatedBy": "alice@example.com"}},
+        "freeform_tags": {"CreatedBy": "fallback@example.com"},
+    }
+
+    assert extract_tag_value(resource, CREATED_BY) == "alice@example.com"
 
 
-def test_missing_freeform_tag_returns_none():
-    assert extract_freeform_tag({"owner": ""}, "owner") is None
-    assert extract_freeform_tag({}, "owner") is None
+def test_extracts_tag_value_from_freeform_canonical_name():
+    resource = {"freeform_tags": {"Owner": "platform-team"}}
+
+    assert extract_tag_value(resource, OWNER) == "platform-team"
 
 
-def test_extracts_tag_value_from_defined_tags():
-    tags = {"Finance": {"CostCenter": "CC-1234"}}
+def test_extracts_tag_value_from_freeform_alias():
+    resource = {"freeform_tags": {"env": "prod"}}
 
-    assert extract_defined_tag(tags, "Finance", "CostCenter") == "CC-1234"
+    assert extract_tag_value(resource, ENVIRONMENT) == "prod"
 
 
-def test_extracts_mandatory_defined_tag_value():
-    mandatory_tag = MandatoryTag(
-        name="cost_center",
-        source="defined",
-        namespace="Finance",
-        key="CostCenter",
-    )
+def test_extracts_tag_value_from_flattened_defined_alias():
+    resource = {"freeform_tags": {"Operations.CreatedBy": "bob@example.com"}}
 
-    assert (
-        extract_mandatory_tag_value({}, {"Finance": {"CostCenter": "CC-1234"}}, mandatory_tag)
-        == "CC-1234"
-    )
+    assert extract_tag_value(resource, CREATED_BY) == "bob@example.com"
+
+
+def test_extracts_case_insensitive_freeform_tag_keys():
+    resource = {"freeform_tags": {"owner": "security-team"}}
+
+    assert extract_tag_value(resource, OWNER) == "security-team"
+
+
+def test_blank_tag_values_return_none():
+    resource = {
+        "defined_tags": {"Operations": {"CreatedBy": "   "}},
+        "freeform_tags": {"CreatedBy": ""},
+    }
+
+    assert extract_tag_value(resource, CREATED_BY) is None
+
+
+def test_missing_or_malformed_tags_return_none():
+    assert extract_tag_value({"freeform_tags": None, "defined_tags": None}, OWNER) is None
+    assert extract_tag_value({"freeform_tags": [], "defined_tags": []}, OWNER) is None
+
+
+def test_low_level_extractors_still_handle_direct_tag_dicts():
+    assert extract_freeform_tag({"Owner": "platform-team"}, "Owner") == "platform-team"
+    assert extract_defined_tag({"Finance": {"CostCenter": "CC-1234"}}, "Finance", "CostCenter") == "CC-1234"

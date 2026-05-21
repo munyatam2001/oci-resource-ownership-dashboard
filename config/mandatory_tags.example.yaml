@@ -1,12 +1,38 @@
 mandatory_tags:
-  - name: owner
-    source: freeform
-    description: Person or team accountable for the resource.
-  - name: cost_center
-    source: defined
-    namespace: Finance
-    key: CostCenter
-    description: Finance cost center used for chargeback.
-  - name: environment
-    source: freeform
-    description: Workload environment such as dev, test, or prod.
+  - canonical_name: CreatedBy
+    defined_tag_namespace: Operations
+    defined_tag_key: CreatedBy
+    aliases:
+      - created_by
+      - creator
+      - createdby
+      - Oracle-Tags.CreatedBy
+  - canonical_name: Owner
+    defined_tag_namespace: Operations
+    defined_tag_key: Owner
+    aliases:
+      - owner
+      - resource_owner
+      - owned_by
+  - canonical_name: CostCenter
+    defined_tag_namespace: Finance
+    defined_tag_key: CostCenter
+    aliases:
+      - cost_center
+      - cost-centre
+      - costcenter
+      - cc
+  - canonical_name: Environment
+    defined_tag_namespace: Operations
+    defined_tag_key: Environment
+    aliases:
+      - env
+      - environment
+      - stage
+  - canonical_name: Application
+    defined_tag_namespace: Operations
+    defined_tag_key: Application
+    aliases:
+      - app
+      - application
+      - service
