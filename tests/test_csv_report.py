@@ -101,3 +101,20 @@ def test_tag_diagnostic_csvs_are_written(tmp_path):
 
     assert any(row["tag_key"] == "Owner" for row in usage_rows)
     assert any(row["mandatory_tag"] == "Owner" for row in hint_rows)
+
+
+def test_ownership_coverage_csv_is_written_with_expected_rows(tmp_path):
+    tags = load_mandatory_tags("config/mandatory_tags.example.yaml")
+    paths = write_csv_outputs(sample_resources(), tags, tmp_path)
+
+    assert tmp_path / "oci_ownership_coverage_summary.csv" in paths
+
+    rows = _read_csv(tmp_path / "oci_ownership_coverage_summary.csv")
+    metrics = {row["metric"] for row in rows}
+
+    assert "Resources with CreatedBy" in metrics
+    assert "Resources with Owner" in metrics
+    assert "Resources with both CreatedBy and Owner" in metrics
+    assert "Resources missing both CreatedBy and Owner" in metrics
+    assert "Resources missing only Owner" in metrics
+    assert "Resources missing only CreatedBy" in metrics

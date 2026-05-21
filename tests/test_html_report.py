@@ -74,6 +74,14 @@ def test_dashboard_contains_compliance_progress_indicator(tmp_path):
     assert "aria-label=\"60% compliant\"" in html
 
 
+def test_dashboard_contains_ownership_coverage_section(tmp_path):
+    html = _render_dashboard(tmp_path).read_text(encoding="utf-8")
+
+    assert "Ownership Coverage" in html
+    assert "Full compliance requires both CreatedBy and Owner" in html
+    assert "Resources missing only Owner" in html
+
+
 def test_dashboard_contains_filter_toolbar_controls(tmp_path):
     html = _render_dashboard(tmp_path).read_text(encoding="utf-8")
 
@@ -101,6 +109,9 @@ def test_dashboard_contains_missing_table_filters_and_quick_chips(tmp_path):
     assert "missingRowCount" in html
     assert "Missing Owner" in html
     assert "Missing CreatedBy" in html
+    assert "Has CreatedBy but Missing Owner" in html
+    assert "Missing Both Ownership Tags" in html
+    assert "Has Both Ownership Tags" in html
     assert "Has CreatedBy" in html
     assert "NoShutDown = Yes" in html
     assert "Created in last 30 days" in html

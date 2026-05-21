@@ -9,6 +9,7 @@ from typing import Any, Mapping, Optional
 from .compliance import evaluate_resource_compliance, summarize_compliance
 from .csv_report import build_inventory_row
 from .models import MandatoryTag
+from .ownership_coverage import ownership_coverage_rows, summarize_ownership_coverage
 from .tag_diagnostics import collect_tag_usage, find_mapping_hints
 
 
@@ -59,6 +60,19 @@ def _metric_card(label: str, value: Any, detail: str = "") -> str:
         f'<div class="metric-detail">{escape(detail)}</div>'
         "</div>"
     )
+
+
+def _coverage_bar(label: str, count: int, percent: float, prominent: bool = False) -> str:
+    kind = " coverage-item-prominent" if prominent else ""
+    return f"""
+      <div class="coverage-item{kind}">
+        <div class="coverage-head">
+          <strong>{escape(label)}</strong>
+          <span>{escape(str(count))} ({_fmt_percent(percent)})</span>
+        </div>
+        <div class="coverage-track"><div class="coverage-fill" style="width: {max(0.0, min(100.0, percent)):.2f}%"></div></div>
+      </div>
+    """
 
 
 def _table(
@@ -134,6 +148,7 @@ def _filter_toolbar(
           </select>
         </label>
         {date_controls}
+        <input id="{prefix}OwnershipPattern" data-filter="{prefix}" data-field="ownership" type="hidden">
         <button type="button" id="{prefix}ClearFilters" data-clear="{prefix}">Clear Filters</button>
         <span class="row-count" id="{prefix}RowCount">Showing 0 of 0 rows</span>
       </div>
@@ -155,6 +170,16 @@ def _row_attrs(row: Mapping[str, Any]) -> str:
         "noshutdown": "yes" if str(row.get("NoShutDown") or "").casefold() == "yes" else "blank",
         "createdon": created_date,
     }
+    has_created_by = bool(row.get("CreatedBy"))
+    has_owner = bool(row.get("Owner"))
+    if has_created_by and has_owner:
+        values["ownership"] = "both"
+    elif has_created_by and not has_owner:
+        values["ownership"] = "missing-owner"
+    elif has_owner and not has_created_by:
+        values["ownership"] = "missing-createdby"
+    else:
+        values["ownership"] = "missing-both"
     return " ".join(f'data-{key}="{escape(str(value))}"' for key, value in values.items())
 
 
@@ -195,6 +220,8 @@ def _insights(
     no_shutdown_count: int,
     oracle_created_on_count: int,
     oracle_created_by_mapped: bool,
+    missing_only_owner: int,
+    missing_both: int,
 ) -> list[str]:
     insights: list[str] = []
     if summary_missing:
@@ -204,6 +231,12 @@ def _insights(
 
     if oracle_created_by_mapped:
         insights.append("Oracle-Tags.CreatedBy is being used as the CreatedBy ownership signal.")
+
+    if missing_only_owner:
+        insights.append("Creator attribution exists, but Owner tagging is the main compliance gap.")
+
+    if missing_both:
+        insights.append("Some resources have no ownership signal and require backfill or policy enforcement.")
 
     if no_shutdown_count:
         insights.append(f"NoShutDown is present on {no_shutdown_count} resources.")
@@ -227,6 +260,7 @@ def _render_dashboard_html(
     generated_at: datetime,
 ) -> str:
     summary = summarize_compliance(resources, mandatory_tags)
+    ownership_summary = summarize_ownership_coverage(resources, mandatory_tags)
     inventory_rows = [build_inventory_row(resource, mandatory_tags) for resource in resources]
     evaluated = [evaluate_resource_compliance(resource, mandatory_tags) for resource in resources]
     tag_names = [tag.canonical_name for tag in mandatory_tags]
@@ -343,6 +377,16 @@ def _render_dashboard_html(
         ]
     )
     progress_value = max(0.0, min(100.0, float(summary.compliance_percent)))
+    coverage_rows = ownership_coverage_rows(ownership_summary)
+    coverage_cards = "".join(
+        _coverage_bar(
+            str(row["metric"]),
+            int(row["count"]),
+            float(row["percent_of_total"]),
+            prominent=row["metric"] == "Resources missing only Owner",
+        )
+        for row in coverage_rows
+    )
     insight_items = "".join(
         f"<li>{escape(insight)}</li>"
         for insight in _insights(
@@ -352,6 +396,8 @@ def _render_dashboard_html(
             resources_with_no_shutdown,
             resources_with_oracle_created_on,
             oracle_created_by_mapped,
+            ownership_summary.resources_missing_only_owner,
+            ownership_summary.resources_missing_both_created_by_and_owner,
         )
     )
     mandatory_scope = " and ".join(tag_names) if tag_names else "none"
@@ -460,6 +506,24 @@ def _render_dashboard_html(
       height: 100%;
       background: linear-gradient(90deg, #2c9b74, #176b87);
     }}
+    .coverage-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+    }}
+    .coverage-item {{
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface-soft);
+    }}
+    .coverage-item-prominent {{
+      border-color: #f0c16f;
+      background: #fff8e8;
+    }}
+    .coverage-head {{ display: flex; justify-content: space-between; gap: 14px; margin-bottom: 9px; }}
+    .coverage-track {{ height: 10px; background: #dbe5ed; border-radius: 999px; overflow: hidden; }}
+    .coverage-fill {{ height: 100%; background: linear-gradient(90deg, #176b87, #2c9b74); }}
     .panel {{ padding: 20px; overflow: hidden; }}
     .section-copy {{ color: var(--muted); margin-bottom: 14px; max-width: 920px; }}
     .table-wrap {{ overflow: auto; max-height: 560px; border: 1px solid var(--line); border-radius: 14px; }}
@@ -601,6 +665,11 @@ def _render_dashboard_html(
           <div class="progress-fill"></div>
         </div>
       </section>
+      <section class="panel">
+        <h2>Ownership Coverage</h2>
+        <p class="section-copy">Full compliance requires both CreatedBy and Owner. Partial coverage shows where attribution already exists and which ownership gaps are easiest to remediate.</p>
+        <div class="coverage-grid">{coverage_cards}</div>
+      </section>
       <section class="insight-panel">
         <h2>Insights</h2>
         <ul>{insight_items}</ul>
@@ -634,6 +703,9 @@ def _render_dashboard_html(
         <div class="quick-filters">
           <button class="quick-chip" type="button" data-chip="missing-owner">Missing Owner</button>
           <button class="quick-chip" type="button" data-chip="missing-createdby">Missing CreatedBy</button>
+          <button class="quick-chip" type="button" data-chip="createdby-missing-owner">Has CreatedBy but Missing Owner</button>
+          <button class="quick-chip" type="button" data-chip="missing-both">Missing Both Ownership Tags</button>
+          <button class="quick-chip" type="button" data-chip="has-both">Has Both Ownership Tags</button>
           <button class="quick-chip" type="button" data-chip="has-createdby">Has CreatedBy</button>
           <button class="quick-chip" type="button" data-chip="noshutdown-yes">NoShutDown = Yes</button>
           <button class="quick-chip" type="button" data-chip="created-last-30" {"disabled" if not has_created_on else ""}>Created in last 30 days</button>
@@ -673,6 +745,10 @@ def _render_dashboard_html(
         if (missing && row.dataset.missing.indexOf(missing) === -1) {{ return false; }}
         var noShutdown = value(prefix + "NoShutDown");
         if (noShutdown && row.dataset.noshutdown !== noShutdown) {{ return false; }}
+        var ownership = value(prefix + "OwnershipPattern");
+        if (ownership === "has-createdby") {{
+          if (row.dataset.ownership !== "both" && row.dataset.ownership !== "missing-owner") {{ return false; }}
+        }} else if (ownership && row.dataset.ownership !== ownership) {{ return false; }}
         var from = value(prefix + "CreatedFrom");
         var to = value(prefix + "CreatedTo");
         if (from && (!row.dataset.createdon || row.dataset.createdon < from)) {{ return false; }}
@@ -711,7 +787,10 @@ def _render_dashboard_html(
           var type = chip.dataset.chip;
           if (type === "missing-owner") {{ setValue("inventoryMissingTag", "Owner"); }}
           if (type === "missing-createdby") {{ setValue("inventoryMissingTag", "CreatedBy"); }}
-          if (type === "has-createdby") {{ setValue("inventoryMissingTag", ""); setValue("inventoryCreatedBy", value("inventoryCreatedBy")); }}
+          if (type === "createdby-missing-owner") {{ setValue("inventoryOwnershipPattern", "missing-owner"); }}
+          if (type === "missing-both") {{ setValue("inventoryOwnershipPattern", "missing-both"); }}
+          if (type === "has-both") {{ setValue("inventoryOwnershipPattern", "both"); }}
+          if (type === "has-createdby") {{ setValue("inventoryOwnershipPattern", "has-createdby"); }}
           if (type === "noshutdown-yes") {{ setValue("inventoryNoShutDown", "yes"); }}
           if (type === "created-last-30") {{
             var today = new Date();

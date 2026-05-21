@@ -71,6 +71,7 @@ def test_sample_mode_generates_all_csvs_and_html(tmp_path):
         "oci_tag_compliance_by_compartment.csv",
         "oci_tag_key_usage.csv",
         "oci_tag_mapping_hints.csv",
+        "oci_ownership_coverage_summary.csv",
         "oci_resource_ownership_dashboard.html",
     }
 

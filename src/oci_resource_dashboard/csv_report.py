@@ -8,6 +8,7 @@ from typing import Any, Mapping
 
 from .compliance import evaluate_resource_compliance, summarize_compliance
 from .models import MandatoryTag
+from .ownership_coverage import ownership_coverage_rows, summarize_ownership_coverage
 from .tag_diagnostics import collect_tag_usage, find_mapping_hints, tag_usage_rows
 from .tag_extractors import extract_no_shutdown, extract_oracle_created_on
 
@@ -76,6 +77,13 @@ MAPPING_HINT_HEADERS = [
 ]
 
 
+OWNERSHIP_COVERAGE_HEADERS = [
+    "metric",
+    "count",
+    "percent_of_total",
+]
+
+
 CSV_FILENAMES = {
     "inventory": "oci_resources_with_tags.csv",
     "missing": "oci_resources_missing_mandatory_tags.csv",
@@ -84,6 +92,7 @@ CSV_FILENAMES = {
     "by_compartment": "oci_tag_compliance_by_compartment.csv",
     "tag_usage": "oci_tag_key_usage.csv",
     "mapping_hints": "oci_tag_mapping_hints.csv",
+    "ownership_coverage": "oci_ownership_coverage_summary.csv",
 }
 
 
@@ -216,5 +225,10 @@ def write_csv_outputs(
     usage = collect_tag_usage(resource_list)
     _write_rows(paths["tag_usage"], TAG_USAGE_HEADERS, tag_usage_rows(usage))
     _write_rows(paths["mapping_hints"], MAPPING_HINT_HEADERS, find_mapping_hints(usage))
+    _write_rows(
+        paths["ownership_coverage"],
+        OWNERSHIP_COVERAGE_HEADERS,
+        ownership_coverage_rows(summarize_ownership_coverage(resource_list, tags)),
+    )
 
     return [paths[name] for name in CSV_FILENAMES]
