@@ -240,7 +240,7 @@ def sample_resources() -> list[dict[str, Any]]:
             "time_created": "2026-05-04T16:45:00Z",
             "defined_tags": {},
             "freeform_tags": {
-                "created_by": "dana@example.com",
+                "Oracle-Tags.CreatedBy": "dana@example.com",
                 "owner": "data-team",
                 "cost_center": "CC-3003",
                 "env": "dev",
@@ -257,6 +257,6 @@ def sample_resources() -> list[dict[str, Any]]:
             "region": "us-ashburn-1",
             "time_created": "2026-05-05T09:20:00Z",
             "defined_tags": {},
-            "freeform_tags": {},
+            "freeform_tags": {"Owner": "network-team"},
         },
     ]

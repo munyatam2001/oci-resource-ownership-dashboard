@@ -19,24 +19,6 @@ MANDATORY_TAGS = [
         defined_tag_key="Owner",
         aliases=("owner",),
     ),
-    MandatoryTag(
-        canonical_name="CostCenter",
-        defined_tag_namespace="Finance",
-        defined_tag_key="CostCenter",
-        aliases=("cost_center", "cc"),
-    ),
-    MandatoryTag(
-        canonical_name="Environment",
-        defined_tag_namespace="Operations",
-        defined_tag_key="Environment",
-        aliases=("env",),
-    ),
-    MandatoryTag(
-        canonical_name="Application",
-        defined_tag_namespace="Operations",
-        defined_tag_key="Application",
-        aliases=("app",),
-    ),
 ]
 
 
@@ -58,14 +40,11 @@ def test_evaluate_resource_compliance_with_realistic_oci_tags():
     assert result.present_tags == {
         "CreatedBy": "alice@example.com",
         "Owner": "platform-team",
-        "CostCenter": "CC-1234",
-        "Environment": "prod",
-        "Application": "billing",
     }
     assert result.missing_tags == ()
 
 
-def test_detects_resource_missing_cost_center():
+def test_non_mandatory_tags_do_not_affect_compliance():
     resource = {
         "defined_tags": {"Operations": {"CreatedBy": "alice@example.com"}},
         "freeform_tags": {"Owner": "platform-team", "env": "prod", "app": "billing"},
@@ -73,8 +52,8 @@ def test_detects_resource_missing_cost_center():
 
     result = evaluate_resource_compliance(resource, MANDATORY_TAGS)
 
-    assert result.compliance_percent == 80.0
-    assert result.missing_tags == ("CostCenter",)
+    assert result.compliance_percent == 100.0
+    assert result.missing_tags == ()
 
 
 def test_resource_with_no_tags_is_noncompliant():
@@ -85,9 +64,6 @@ def test_resource_with_no_tags_is_noncompliant():
     assert result.missing_tags == (
         "CreatedBy",
         "Owner",
-        "CostCenter",
-        "Environment",
-        "Application",
     )
 
 
@@ -100,7 +76,7 @@ def test_resource_with_blank_tag_values_is_noncompliant_for_blank_tags():
     result = evaluate_resource_compliance(resource, MANDATORY_TAGS)
 
     assert result.missing_tags == ("CreatedBy", "Owner")
-    assert result.compliance_percent == 60.0
+    assert result.compliance_percent == 0.0
 
 
 def test_missing_mandatory_tags_returns_canonical_names():
@@ -108,9 +84,6 @@ def test_missing_mandatory_tags_returns_canonical_names():
 
     assert missing_mandatory_tags(resource, MANDATORY_TAGS) == (
         "CreatedBy",
-        "CostCenter",
-        "Environment",
-        "Application",
     )
 
 
@@ -133,20 +106,14 @@ def test_summarize_compliance_counts_present_and_missing_tags():
     summary = summarize_compliance(resources, MANDATORY_TAGS)
 
     assert summary.total_resources == 3
-    assert summary.compliant_resources == 1
-    assert summary.noncompliant_resources == 2
-    assert summary.compliance_percent == 33.33
+    assert summary.compliant_resources == 2
+    assert summary.noncompliant_resources == 1
+    assert summary.compliance_percent == 66.67
     assert summary.missing_count_by_tag == {
         "CreatedBy": 1,
         "Owner": 1,
-        "CostCenter": 2,
-        "Environment": 1,
-        "Application": 1,
     }
     assert summary.present_count_by_tag == {
         "CreatedBy": 2,
         "Owner": 2,
-        "CostCenter": 1,
-        "Environment": 2,
-        "Application": 2,
     }

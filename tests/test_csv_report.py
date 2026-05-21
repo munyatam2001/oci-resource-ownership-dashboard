@@ -21,6 +21,9 @@ def test_inventory_csv_headers(tmp_path):
         headers = next(reader)
 
     assert headers == INVENTORY_HEADERS
+    assert "CostCenter" not in headers
+    assert "Environment" not in headers
+    assert "Application" not in headers
 
 
 def test_missing_tags_csv_only_includes_noncompliant_resources(tmp_path):
@@ -29,13 +32,15 @@ def test_missing_tags_csv_only_includes_noncompliant_resources(tmp_path):
 
     rows = _read_csv(tmp_path / "oci_resources_missing_mandatory_tags.csv")
 
-    assert len(rows) == 3
+    assert len(rows) == 2
     assert {row["resource_name"] for row in rows} == {
-        "prod-app-subnet",
         "audit-log-bucket",
         "legacy-vcn",
     }
     assert all(row["is_compliant"] == "false" for row in rows)
+    assert all("CostCenter" not in row["missing_tags"] for row in rows)
+    assert all("Environment" not in row["missing_tags"] for row in rows)
+    assert all("Application" not in row["missing_tags"] for row in rows)
 
 
 def test_summary_csv_contains_expected_totals(tmp_path):
@@ -47,9 +52,9 @@ def test_summary_csv_contains_expected_totals(tmp_path):
     assert rows == [
         {
             "total_resources": "5",
-            "compliant_resources": "2",
-            "noncompliant_resources": "3",
-            "compliance_percent": "40.0",
+            "compliant_resources": "3",
+            "noncompliant_resources": "2",
+            "compliance_percent": "60.0",
         }
     ]
 
@@ -61,9 +66,9 @@ def test_owner_grouping_handles_missing_owner_as_unknown(tmp_path):
     rows = _read_csv(tmp_path / "oci_tag_compliance_by_owner.csv")
     by_group = {row["group"]: row for row in rows}
 
-    assert by_group["Unknown"]["total_resources"] == "2"
+    assert by_group["Unknown"]["total_resources"] == "1"
     assert by_group["Unknown"]["compliant_resources"] == "0"
-    assert by_group["Unknown"]["noncompliant_resources"] == "2"
+    assert by_group["Unknown"]["noncompliant_resources"] == "1"
 
 
 def test_compartment_grouping_handles_missing_owner_as_unknown(tmp_path):

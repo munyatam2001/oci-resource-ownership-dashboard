@@ -11,7 +11,7 @@ from .models import MandatoryTag
 from .tag_diagnostics import collect_tag_usage, find_mapping_hints, tag_usage_rows
 
 
-INVENTORY_HEADERS = [
+INVENTORY_BASE_HEADERS = [
     "resource_name",
     "resource_id",
     "resource_type",
@@ -20,14 +20,21 @@ INVENTORY_HEADERS = [
     "compartment_name",
     "region",
     "time_created",
-    "CreatedBy",
-    "Owner",
-    "CostCenter",
-    "Environment",
-    "Application",
+]
+
+
+INVENTORY_TRAILING_HEADERS = [
     "missing_tags",
     "compliance_percent",
     "is_compliant",
+]
+
+
+INVENTORY_HEADERS = [
+    *INVENTORY_BASE_HEADERS,
+    "CreatedBy",
+    "Owner",
+    *INVENTORY_TRAILING_HEADERS,
 ]
 
 
@@ -77,6 +84,16 @@ CSV_FILENAMES = {
 }
 
 
+def inventory_headers(mandatory_tags: Iterable[MandatoryTag]) -> list[str]:
+    """Return inventory headers for the active mandatory tag model."""
+
+    return [
+        *INVENTORY_BASE_HEADERS,
+        *(tag.canonical_name for tag in mandatory_tags),
+        *INVENTORY_TRAILING_HEADERS,
+    ]
+
+
 def _resource_value(resource: Mapping[str, Any], *keys: str) -> str:
     for key in keys:
         value = resource.get(key)
@@ -92,7 +109,8 @@ def build_inventory_row(
     """Build one resource inventory CSV row."""
 
     result = evaluate_resource_compliance(resource, mandatory_tags)
-    return {
+    tags = tuple(mandatory_tags)
+    row = {
         "resource_name": _resource_value(resource, "resource_name", "display_name", "name"),
         "resource_id": _resource_value(resource, "resource_id", "id"),
         "resource_type": _resource_value(resource, "resource_type"),
@@ -101,15 +119,13 @@ def build_inventory_row(
         "compartment_name": _resource_value(resource, "compartment_name"),
         "region": _resource_value(resource, "region"),
         "time_created": _resource_value(resource, "time_created"),
-        "CreatedBy": result.present_tags.get("CreatedBy", ""),
-        "Owner": result.present_tags.get("Owner", ""),
-        "CostCenter": result.present_tags.get("CostCenter", ""),
-        "Environment": result.present_tags.get("Environment", ""),
-        "Application": result.present_tags.get("Application", ""),
         "missing_tags": ";".join(result.missing_tags),
         "compliance_percent": result.compliance_percent,
         "is_compliant": str(result.is_compliant).lower(),
     }
+    for tag in tags:
+        row[tag.canonical_name] = result.present_tags.get(tag.canonical_name, "")
+    return row
 
 
 def _write_rows(path: Path, headers: list[str], rows: Iterable[dict[str, Any]]) -> None:
@@ -171,8 +187,9 @@ def write_csv_outputs(
         name: output_dir / filename for name, filename in CSV_FILENAMES.items()
     }
 
-    _write_rows(paths["inventory"], INVENTORY_HEADERS, inventory_rows)
-    _write_rows(paths["missing"], INVENTORY_HEADERS, missing_rows)
+    headers = inventory_headers(tags)
+    _write_rows(paths["inventory"], headers, inventory_rows)
+    _write_rows(paths["missing"], headers, missing_rows)
     _write_rows(
         paths["summary"],
         SUMMARY_HEADERS,

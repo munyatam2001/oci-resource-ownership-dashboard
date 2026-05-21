@@ -9,9 +9,6 @@ def test_loads_mandatory_tags_from_example_config():
     assert [tag.canonical_name for tag in tags] == [
         "CreatedBy",
         "Owner",
-        "CostCenter",
-        "Environment",
-        "Application",
     ]
     assert tags[0].defined_tag_namespace == "Operations"
     assert "created_by" in tags[0].aliases

@@ -30,7 +30,9 @@ def test_dashboard_contains_summary_metrics(tmp_path):
     assert "Total Resources" in html
     assert "Compliant Resources" in html
     assert "Non-Compliant Resources" in html
-    assert "40%" in html
+    assert "60%" in html
+    assert "Resources with CreatedBy" in html
+    assert "Resources with Owner" in html
     assert "Unique Owners" in html
     assert "Unique Creators" in html
 
@@ -39,7 +41,9 @@ def test_dashboard_contains_tag_based_attribution_note(tmp_path):
     html = _render_dashboard(tmp_path).read_text(encoding="utf-8")
 
     assert "Attribution is tag-based only" in html
-    assert "not OCI Audit" in html
+    assert "OCI Audit is not used" in html
+    assert "Current mandatory ownership tags: CreatedBy and Owner" in html
+    assert "Tag-based ownership and compliance visibility" in html
 
 
 def test_dashboard_contains_sample_resource_names(tmp_path):
@@ -58,6 +62,14 @@ def test_dashboard_contains_existing_tag_usage_section(tmp_path):
     assert "Existing Tag Usage" in html
     assert "Potential Mapping Hints" in html
     assert "Operations.CreatedBy" in html
+
+
+def test_dashboard_contains_compliance_progress_indicator(tmp_path):
+    html = _render_dashboard(tmp_path).read_text(encoding="utf-8")
+
+    assert "Ownership Compliance Progress" in html
+    assert "progress-track" in html
+    assert "aria-label=\"60% compliant\"" in html
 
 
 def test_dashboard_uses_no_external_cdn_references(tmp_path):

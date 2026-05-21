@@ -28,32 +28,108 @@ def _fmt_percent(value: float) -> str:
     return f"{value:.2f}%"
 
 
-def _metric_card(label: str, value: Any) -> str:
+def _title_cell(value: Any, css_class: str = "truncate") -> str:
+    text = str(value or "")
+    return f'<span class="{css_class}" title="{escape(text)}">{escape(text)}</span>'
+
+
+def _short_title_cell(value: Any, css_class: str = "ocid") -> str:
+    text = str(value or "")
+    return f'<span class="{css_class}" title="{escape(text)}">{escape(_short_ocid(text))}</span>'
+
+
+def _badge(value: Any, kind: str = "neutral") -> str:
+    text = str(value or "Unknown")
+    return f'<span class="badge badge-{escape(kind)}" title="{escape(text)}">{escape(text)}</span>'
+
+
+def _tag_badges(value: str) -> str:
+    tags = [tag for tag in value.split(";") if tag]
+    if not tags:
+        return ""
+    return " ".join(_badge(tag, "missing") for tag in tags)
+
+
+def _metric_card(label: str, value: Any, detail: str = "") -> str:
     return (
         '<div class="metric-card">'
         f'<div class="metric-value">{escape(str(value))}</div>'
         f'<div class="metric-label">{escape(label)}</div>'
+        f'<div class="metric-detail">{escape(detail)}</div>'
         "</div>"
     )
 
 
-def _table(headers: list[str], rows: list[list[Any]], table_id: Optional[str] = None) -> str:
+def _table(
+    headers: list[str],
+    rows: list[list[Any]],
+    table_id: Optional[str] = None,
+    raw: bool = False,
+) -> str:
     id_attr = f' id="{escape(table_id)}"' if table_id else ""
     thead = "".join(f"<th>{escape(header)}</th>" for header in headers)
     body_rows = []
     for row in rows:
-        cells = "".join(f"<td>{escape(str(value))}</td>" for value in row)
+        cells = "".join(f"<td>{value if raw else escape(str(value))}</td>" for value in row)
         body_rows.append(f"<tr>{cells}</tr>")
     tbody = "".join(body_rows)
     return f"<table{id_attr}><thead><tr>{thead}</tr></thead><tbody>{tbody}</tbody></table>"
 
 
-def _resource_value(resource: Mapping[str, Any], *keys: str) -> str:
-    for key in keys:
-        value = resource.get(key)
-        if value is not None:
-            return str(value)
-    return ""
+def _state_badge(state: str) -> str:
+    normalized = state.upper()
+    if normalized in {"RUNNING", "ACTIVE", "AVAILABLE"}:
+        return _badge(state, "good")
+    if normalized in {"STOPPED", "TERMINATED", "DELETED", "FAILED"}:
+        return _badge(state, "bad")
+    return _badge(state or "Unknown", "neutral")
+
+
+def _compliance_badge(percent: float) -> str:
+    if percent >= 100:
+        return _badge(_fmt_percent(percent), "good")
+    if percent <= 0:
+        return _badge(_fmt_percent(percent), "bad")
+    return _badge(_fmt_percent(percent), "warn")
+
+
+def _insights(
+    summary_missing: dict[str, int],
+    total_resources: int,
+    mapping_hint_rows: list[dict[str, Any]],
+) -> list[str]:
+    insights: list[str] = []
+    if summary_missing:
+        tag, missing_count = max(summary_missing.items(), key=lambda item: item[1])
+        if missing_count:
+            insights.append(f"Most resources are missing {tag}: {missing_count} of {total_resources}.")
+
+    created_by_hints = [
+        row for row in mapping_hint_rows if row["mandatory_tag"] == "CreatedBy"
+    ]
+    if created_by_hints:
+        oracle_hint = next(
+            (
+                row
+                for row in created_by_hints
+                if row["candidate_existing_key"] == "Oracle-Tags.CreatedBy"
+            ),
+            None,
+        )
+        top_hint = oracle_hint or max(
+            created_by_hints,
+            key=lambda row: int(row["resources_with_key"]),
+        )
+        insights.append(
+            f"CreatedBy appears in existing tags such as {top_hint['candidate_existing_key']}."
+        )
+
+    if mapping_hint_rows:
+        insights.append("Use Potential Mapping Hints to update tag aliases.")
+
+    if not insights:
+        insights.append("Ownership tags are easy to interpret for the current scan.")
+    return insights
 
 
 def _render_dashboard_html(
@@ -66,7 +142,10 @@ def _render_dashboard_html(
     summary = summarize_compliance(resources, mandatory_tags)
     inventory_rows = [build_inventory_row(resource, mandatory_tags) for resource in resources]
     evaluated = [evaluate_resource_compliance(resource, mandatory_tags) for resource in resources]
+    tag_names = [tag.canonical_name for tag in mandatory_tags]
 
+    resources_with_created_by = summary.present_count_by_tag.get("CreatedBy", 0)
+    resources_with_owner = summary.present_count_by_tag.get("Owner", 0)
     unique_owners = {
         str(result.present_tags["Owner"])
         for result in evaluated
@@ -85,72 +164,87 @@ def _render_dashboard_html(
         percent = 100.0
         if summary.total_resources:
             percent = round((present / summary.total_resources) * 100, 2)
-        tag_rows.append([tag.canonical_name, present, missing, _fmt_percent(percent)])
+        tag_rows.append(
+            [
+                _badge(tag.canonical_name, "tag"),
+                present,
+                missing,
+                _compliance_badge(percent),
+            ]
+        )
 
     missing_resource_rows = []
     for row in inventory_rows:
         if row["is_compliant"] == "false":
             missing_resource_rows.append(
                 [
-                    row["resource_name"],
-                    row["resource_type"],
-                    row["compartment_name"],
-                    row["lifecycle_state"],
-                    row["Owner"] or "Unknown",
-                    row["CreatedBy"] or "Unknown",
-                    row["missing_tags"],
-                    _short_ocid(row["resource_id"]),
+                    _title_cell(row["resource_name"]),
+                    _title_cell(row["resource_type"], "compact"),
+                    _title_cell(row["compartment_name"]),
+                    _state_badge(row["lifecycle_state"]),
+                    _title_cell(row.get("Owner") or "Unknown"),
+                    _title_cell(row.get("CreatedBy") or "Unknown"),
+                    _tag_badges(row["missing_tags"]),
+                    _short_title_cell(row["resource_id"]),
                 ]
             )
 
-    full_inventory_rows = [
-        [
-            row["resource_name"],
-            row["resource_type"],
-            row["compartment_name"],
-            row["lifecycle_state"],
-            row["CreatedBy"] or "Unknown",
-            row["Owner"] or "Unknown",
-            row["CostCenter"] or "Unknown",
-            row["Environment"] or "Unknown",
-            row["Application"] or "Unknown",
-            _fmt_percent(float(row["compliance_percent"])),
+    full_inventory_rows = []
+    for row in inventory_rows:
+        resource_cells = [
+            _title_cell(row["resource_name"]),
+            _title_cell(row["resource_type"], "compact"),
+            _title_cell(row["compartment_name"]),
+            _state_badge(row["lifecycle_state"]),
         ]
-        for row in inventory_rows
-    ]
+        tag_cells = [_title_cell(row.get(tag_name) or "Unknown") for tag_name in tag_names]
+        full_inventory_rows.append(
+            [
+                *resource_cells,
+                *tag_cells,
+                _compliance_badge(float(row["compliance_percent"])),
+            ]
+        )
+
     tag_usage = collect_tag_usage(resources)
     tag_usage_rows = [
         [
-            usage.tag_type,
-            usage.tag_key,
+            _badge(usage.tag_type, "tag"),
+            _title_cell(usage.tag_key),
             usage.resources_with_key,
             usage.resources_with_nonempty_value,
-            "; ".join(usage.example_values),
+            _title_cell("; ".join(usage.example_values), "examples"),
         ]
         for usage in tag_usage
     ]
+    mapping_hint_data = find_mapping_hints(tag_usage)
     mapping_hint_rows = [
         [
-            row["mandatory_tag"],
-            row["candidate_existing_key"],
-            row["tag_type"],
+            _badge(row["mandatory_tag"], "tag"),
+            _title_cell(row["candidate_existing_key"]),
+            _badge(row["tag_type"], "tag"),
             row["resources_with_key"],
-            row["example_values"].replace(";", "; "),
+            _title_cell(row["example_values"].replace(";", "; "), "examples"),
         ]
-        for row in find_mapping_hints(tag_usage)
+        for row in mapping_hint_data
     ]
 
     generated_text = generated_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     cards = "".join(
         [
-            _metric_card("Total Resources", summary.total_resources),
-            _metric_card("Compliant Resources", summary.compliant_resources),
-            _metric_card("Non-Compliant Resources", summary.noncompliant_resources),
-            _metric_card("Compliance", _fmt_percent(summary.compliance_percent)),
-            _metric_card("Unique Owners", len(unique_owners)),
-            _metric_card("Unique Creators", len(unique_creators)),
+            _metric_card("Total Resources", summary.total_resources, "Resources in scope"),
+            _metric_card("Compliant Resources", summary.compliant_resources, "Have CreatedBy and Owner"),
+            _metric_card("Non-Compliant Resources", summary.noncompliant_resources, "Missing ownership tags"),
+            _metric_card("Compliance %", _fmt_percent(summary.compliance_percent), "Mandatory ownership coverage"),
+            _metric_card("Resources with CreatedBy", resources_with_created_by, "Tag-derived creator signal"),
+            _metric_card("Resources with Owner", resources_with_owner, "Tag-derived owner signal"),
+            _metric_card("Unique Owners", len(unique_owners), "Distinct tag-derived owners"),
+            _metric_card("Unique Creators", len(unique_creators), "Distinct tag-derived creators"),
         ]
     )
+    progress_value = max(0.0, min(100.0, float(summary.compliance_percent)))
+    insight_items = "".join(f"<li>{escape(insight)}</li>" for insight in _insights(summary.missing_count_by_tag, summary.total_resources, mapping_hint_data))
+    mandatory_scope = " and ".join(tag_names) if tag_names else "none"
 
     return f"""<!doctype html>
 <html lang="en">
@@ -160,142 +254,236 @@ def _render_dashboard_html(
   <title>OCI Resource Ownership Dashboard</title>
   <style>
     :root {{
-      color-scheme: light;
-      --bg: #f5f7fb;
+      --bg: #eef3f8;
       --surface: #ffffff;
-      --line: #d9e1ec;
-      --text: #202936;
-      --muted: #5f6f82;
-      --accent: #006b8f;
-      --accent-soft: #e5f4f8;
-      --danger: #9f2a2a;
+      --surface-soft: #f8fafc;
+      --line: #d9e2ec;
+      --text: #182231;
+      --muted: #637083;
+      --accent: #176b87;
+      --accent-strong: #0f4e63;
+      --good: #19744b;
+      --good-bg: #e8f6ef;
+      --warn: #9a6200;
+      --warn-bg: #fff3d8;
+      --bad: #a33a36;
+      --bad-bg: #fde9e7;
+      --shadow: 0 16px 40px rgba(24, 34, 49, 0.10);
     }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
-      font-family: Arial, Helvetica, sans-serif;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
       background: var(--bg);
       color: var(--text);
       line-height: 1.45;
     }}
     header {{
-      background: #182332;
-      color: #ffffff;
-      padding: 28px 32px;
+      background: linear-gradient(135deg, #17364a 0%, #245b6e 100%);
+      color: #fff;
+      padding: 34px 32px 92px;
     }}
-    h1, h2 {{ margin: 0; }}
-    h1 {{ font-size: 30px; font-weight: 700; }}
-    h2 {{ font-size: 20px; margin-bottom: 14px; }}
-    main {{ padding: 24px 32px 40px; }}
+    h1, h2, p {{ margin-top: 0; }}
+    h1 {{ margin-bottom: 10px; font-size: 34px; letter-spacing: 0; }}
+    .subtitle {{ margin: 0 0 16px; color: #dce9f1; font-size: 16px; }}
+    h2 {{ margin-bottom: 6px; font-size: 20px; }}
+    main {{ margin-top: -68px; padding: 0 32px 42px; }}
+    .header-grid {{
+      display: grid;
+      grid-template-columns: minmax(0, 1.8fr) minmax(280px, 0.9fr);
+      gap: 22px;
+      align-items: end;
+    }}
     .meta {{
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 8px 20px;
-      margin-top: 16px;
-      color: #dce7f2;
+      gap: 8px 18px;
+      color: #dce9f1;
       font-size: 14px;
     }}
-    .note {{
-      margin-top: 16px;
-      padding: 10px 12px;
-      background: rgba(255, 255, 255, 0.12);
-      border-left: 4px solid #6fd1e6;
-      max-width: 960px;
+    .scope-card {{
+      background: rgba(255, 255, 255, 0.13);
+      border: 1px solid rgba(255, 255, 255, 0.24);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: var(--shadow);
     }}
-    section {{ margin-top: 24px; }}
+    .scope-card p {{ margin: 0 0 8px; }}
+    .dashboard-grid {{
+      display: grid;
+      gap: 18px;
+    }}
     .cards {{
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      grid-template-columns: repeat(6, minmax(140px, 1fr));
       gap: 14px;
     }}
-    .metric-card {{
+    .metric-card, .panel, .insight-panel {{
       background: var(--surface);
       border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 16px;
+      border-radius: 18px;
+      box-shadow: var(--shadow);
     }}
-    .metric-value {{ font-size: 28px; font-weight: 700; color: var(--accent); }}
-    .metric-label {{ margin-top: 4px; color: var(--muted); font-size: 13px; }}
-    .panel {{
-      background: var(--surface);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 16px;
-      overflow-x: auto;
+    .metric-card {{ padding: 18px; min-height: 118px; }}
+    .metric-value {{ font-size: 30px; font-weight: 760; color: var(--accent-strong); }}
+    .metric-label {{ margin-top: 6px; color: var(--text); font-size: 13px; font-weight: 700; }}
+    .metric-detail {{ margin-top: 4px; color: var(--muted); font-size: 12px; }}
+    .progress-card {{ padding: 18px; }}
+    .progress-head {{ display: flex; justify-content: space-between; gap: 18px; align-items: center; }}
+    .progress-track {{
+      height: 14px;
+      margin-top: 14px;
+      background: #dbe5ed;
+      border-radius: 999px;
+      overflow: hidden;
     }}
-    table {{
-      width: 100%;
-      border-collapse: collapse;
-      min-width: 780px;
-      font-size: 14px;
+    .progress-fill {{
+      width: {progress_value:.2f}%;
+      height: 100%;
+      background: linear-gradient(90deg, #2c9b74, #176b87);
     }}
-    th, td {{
-      border-bottom: 1px solid var(--line);
-      padding: 10px 12px;
-      text-align: left;
-      vertical-align: top;
-    }}
+    .panel {{ padding: 20px; overflow: hidden; }}
+    .section-copy {{ color: var(--muted); margin-bottom: 14px; max-width: 920px; }}
+    .table-wrap {{ overflow: auto; max-height: 560px; border: 1px solid var(--line); border-radius: 14px; }}
+    table {{ width: 100%; border-collapse: separate; border-spacing: 0; min-width: 820px; font-size: 13px; }}
+    th, td {{ border-bottom: 1px solid var(--line); padding: 11px 12px; text-align: left; vertical-align: top; }}
     th {{
-      background: var(--accent-soft);
-      color: #173444;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: var(--surface-soft);
+      color: #304154;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }}
+    tr:hover td {{ background: #fbfdff; }}
+    .badge {{
+      display: inline-flex;
+      align-items: center;
+      max-width: 260px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
       font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      vertical-align: middle;
     }}
-    tr:hover td {{ background: #f8fbfd; }}
-    .search-row {{
-      display: flex;
-      justify-content: flex-end;
-      margin-bottom: 12px;
+    .badge-good {{ color: var(--good); background: var(--good-bg); }}
+    .badge-warn {{ color: var(--warn); background: var(--warn-bg); }}
+    .badge-bad, .badge-missing {{ color: var(--bad); background: var(--bad-bg); }}
+    .badge-tag, .badge-neutral {{ color: var(--accent-strong); background: #e7f2f6; }}
+    .truncate, .compact, .examples, .ocid {{
+      display: inline-block;
+      max-width: 280px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }}
+    .compact {{ max-width: 140px; }}
+    .examples {{ max-width: 420px; white-space: normal; }}
+    .ocid {{ max-width: 180px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }}
+    .header-ocid {{
+      display: inline-block;
+      max-width: 360px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      vertical-align: bottom;
+      color: #fff;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+    }}
+    .insight-panel {{ padding: 18px 20px; background: #fffdf8; border-color: #f0dfb7; }}
+    .insight-panel ul {{ margin: 10px 0 0; padding-left: 20px; color: #4b3b18; }}
+    .search-row {{ display: flex; justify-content: flex-end; margin-bottom: 12px; }}
     input[type="search"] {{
       width: min(420px, 100%);
       border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 10px 12px;
+      border-radius: 999px;
+      padding: 11px 14px;
       font-size: 14px;
+      background: #fff;
     }}
-    .empty {{
-      color: var(--muted);
-      padding: 10px 0;
+    .empty {{ color: var(--muted); padding: 12px 0; }}
+    @media (max-width: 1200px) {{ .cards {{ grid-template-columns: repeat(3, minmax(160px, 1fr)); }} }}
+    @media (max-width: 760px) {{
+      header {{ padding: 24px 18px 82px; }}
+      main {{ padding: 0 14px 28px; }}
+      .header-grid {{ grid-template-columns: 1fr; }}
+      .cards {{ grid-template-columns: 1fr; }}
+      h1 {{ font-size: 27px; }}
     }}
   </style>
 </head>
 <body>
   <header>
-    <h1>OCI Resource Ownership Dashboard</h1>
-    <div class="meta">
-      <div><strong>Generated:</strong> {escape(generated_text)}</div>
-      <div><strong>Region:</strong> {escape(region)}</div>
-      <div><strong>Root compartment:</strong> {escape(root_compartment_id)}</div>
+    <div class="header-grid">
+      <div>
+        <h1>OCI Resource Ownership Dashboard</h1>
+        <p class="subtitle">Tag-based ownership and compliance visibility</p>
+        <div class="meta">
+          <div><strong>Generated:</strong> {escape(generated_text)}</div>
+          <div><strong>Region:</strong> {escape(region)}</div>
+          <div><strong>Root compartment:</strong> {_short_title_cell(root_compartment_id, "header-ocid")}</div>
+        </div>
+      </div>
+      <div class="scope-card">
+        <p><strong>Current mandatory ownership tags: {escape(mandatory_scope)}</strong></p>
+        <p>Attribution is tag-based only. OCI Audit is not used.</p>
+      </div>
     </div>
-    <div class="note">Attribution is tag-based only. CreatedBy and Owner are derived from resource tags, not OCI Audit.</div>
   </header>
   <main>
-    <section>
-      <div class="cards">{cards}</div>
-    </section>
-    <section class="panel">
-      <h2>Mandatory Tag Compliance</h2>
-      {_table(["Tag", "Present Count", "Missing Count", "Compliance %"], tag_rows)}
-    </section>
-    <section class="panel">
-      <h2>Resources Missing Mandatory Tags</h2>
-      {_table(["Resource Name", "Type", "Compartment Name", "Lifecycle State", "Owner", "Created By", "Missing Tags", "Shortened OCID"], missing_resource_rows) if missing_resource_rows else '<div class="empty">No resources are missing mandatory tags.</div>'}
-    </section>
-    <section class="panel">
-      <h2>Existing Tag Usage</h2>
-      {_table(["Tag Type", "Tag Key", "Resources With Key", "Non-Empty Values", "Example Values"], tag_usage_rows) if tag_usage_rows else '<div class="empty">No tags were found on the scanned resources.</div>'}
-    </section>
-    <section class="panel">
-      <h2>Potential Mapping Hints</h2>
-      {_table(["Mandatory Tag", "Candidate Existing Key", "Tag Type", "Resources With Key", "Example Values"], mapping_hint_rows) if mapping_hint_rows else '<div class="empty">No likely mapping hints were found.</div>'}
-    </section>
-    <section class="panel">
-      <h2>Full Resource Inventory</h2>
-      <div class="search-row">
-        <input id="inventorySearch" type="search" placeholder="Search inventory">
-      </div>
-      {_table(["Resource", "Type", "Compartment", "State", "CreatedBy", "Owner", "CostCenter", "Environment", "Application", "Compliance %"], full_inventory_rows, "inventoryTable")}
-    </section>
+    <div class="dashboard-grid">
+      <section class="cards">{cards}</section>
+      <section class="panel progress-card">
+        <div class="progress-head">
+          <div>
+            <h2>Ownership Compliance Progress</h2>
+            <p class="section-copy">Accessible value: {_fmt_percent(summary.compliance_percent)} compliant.</p>
+          </div>
+          {_compliance_badge(summary.compliance_percent)}
+        </div>
+        <div class="progress-track" role="img" aria-label="{_fmt_percent(summary.compliance_percent)} compliant">
+          <div class="progress-fill"></div>
+        </div>
+      </section>
+      <section class="insight-panel">
+        <h2>Insights</h2>
+        <ul>{insight_items}</ul>
+      </section>
+      <section class="panel">
+        <h2>Mandatory Tag Compliance</h2>
+        <p class="section-copy">Coverage for the current ownership tag model. These counts drive resource compliance.</p>
+        <div class="table-wrap">{_table(["Tag", "Present Count", "Missing Count", "Compliance"], tag_rows, raw=True)}</div>
+      </section>
+      <section class="panel">
+        <h2>Resources Missing Mandatory Tags</h2>
+        <p class="section-copy">Resources below are missing CreatedBy, Owner, or both. OCIDs are shortened visually but available on hover.</p>
+        <div class="table-wrap">{_table(["Resource Name", "Type", "Compartment Name", "Lifecycle State", "Owner", "Created By", "Missing Tags", "Shortened OCID"], missing_resource_rows, raw=True) if missing_resource_rows else '<div class="empty">No resources are missing mandatory tags.</div>'}</div>
+      </section>
+      <section class="panel">
+        <h2>Existing Tag Usage</h2>
+        <p class="section-copy">All tag keys discovered on scanned resources, including tags that are not mandatory. Use this to understand the tenancy vocabulary.</p>
+        <div class="table-wrap">{_table(["Tag Type", "Tag Key", "Resources With Key", "Non-Empty Values", "Example Values"], tag_usage_rows, raw=True) if tag_usage_rows else '<div class="empty">No tags were found on the scanned resources.</div>'}</div>
+      </section>
+      <section class="panel">
+        <h2>Potential Mapping Hints</h2>
+        <p class="section-copy">Likely existing keys that can be mapped into the mandatory ownership model by adding aliases.</p>
+        <div class="table-wrap">{_table(["Mandatory Tag", "Candidate Existing Key", "Tag Type", "Resources With Key", "Example Values"], mapping_hint_rows, raw=True) if mapping_hint_rows else '<div class="empty">No likely mapping hints were found.</div>'}</div>
+      </section>
+      <section class="panel">
+        <h2>Full Resource Inventory</h2>
+        <p class="section-copy">Searchable inventory with active mandatory ownership tags and compliance status.</p>
+        <div class="search-row">
+          <input id="inventorySearch" type="search" placeholder="Search inventory">
+        </div>
+        <div class="table-wrap">{_table(["Resource", "Type", "Compartment", "State", *tag_names, "Compliance"], full_inventory_rows, "inventoryTable", raw=True)}</div>
+      </section>
+    </div>
   </main>
   <script>
     (function () {{

@@ -49,6 +49,32 @@ def test_max_resource_limiting_in_sample_mode(tmp_path):
     assert len(rows) == 2
 
 
+def test_sample_mode_generates_all_csvs_and_html(tmp_path):
+    result = scan_resources(
+        auth_method="instance_principal",
+        region="us-ashburn-1",
+        compartment_id="ocid1.compartment.oc1..root",
+        include_subcompartments=False,
+        mandatory_tags_path=CONFIG_PATH,
+        output_dir=tmp_path,
+        sample=True,
+        console=FakeConsole(),
+    )
+
+    generated_names = {path.name for path in result.generated_files}
+
+    assert generated_names == {
+        "oci_resources_with_tags.csv",
+        "oci_resources_missing_mandatory_tags.csv",
+        "oci_tag_compliance_summary.csv",
+        "oci_tag_compliance_by_owner.csv",
+        "oci_tag_compliance_by_compartment.csv",
+        "oci_tag_key_usage.csv",
+        "oci_tag_mapping_hints.csv",
+        "oci_resource_ownership_dashboard.html",
+    }
+
+
 def test_max_resource_limiting_in_live_mode_using_mocks(monkeypatch, tmp_path):
     class FakeCompartmentDiscovery:
         def __init__(self, auth_context):
