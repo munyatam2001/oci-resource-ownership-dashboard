@@ -118,3 +118,16 @@ def test_ownership_coverage_csv_is_written_with_expected_rows(tmp_path):
     assert "Resources missing both CreatedBy and Owner" in metrics
     assert "Resources missing only Owner" in metrics
     assert "Resources missing only CreatedBy" in metrics
+
+
+def test_owner_backfill_csv_includes_only_created_by_present_owner_missing(tmp_path):
+    tags = load_mandatory_tags("config/mandatory_tags.example.yaml")
+    paths = write_csv_outputs(sample_resources(), tags, tmp_path)
+
+    assert tmp_path / "oci_owner_backfill_recommendations.csv" in paths
+
+    rows = _read_csv(tmp_path / "oci_owner_backfill_recommendations.csv")
+
+    assert [row["resource_name"] for row in rows] == ["audit-log-bucket"]
+    assert rows[0]["created_by"]
+    assert rows[0]["recommended_owner"] == ""

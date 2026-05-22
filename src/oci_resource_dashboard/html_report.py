@@ -9,6 +9,7 @@ from typing import Any, Mapping, Optional
 from .compliance import evaluate_resource_compliance, summarize_compliance
 from .csv_report import build_inventory_row
 from .models import MandatoryTag
+from .owner_backfill import owner_backfill_rows
 from .ownership_coverage import ownership_coverage_rows, summarize_ownership_coverage
 from .tag_diagnostics import collect_tag_usage, find_mapping_hints
 
@@ -360,6 +361,19 @@ def _render_dashboard_html(
         ]
         for row in mapping_hint_data
     ]
+    owner_backfill_data = owner_backfill_rows(resources, mandatory_tags)
+    owner_backfill_table_rows = [
+        [
+            _title_cell(row["created_by"]),
+            _title_cell(row["resource_name"]),
+            _title_cell(row["resource_type"], "compact"),
+            _title_cell(row["compartment_name"]),
+            _title_cell(row["oracle_created_on"] or "Unknown"),
+            _badge(row["no_shutdown"] or "No/Blank", "tag" if row["no_shutdown"] else "neutral"),
+            _title_cell(row["suggested_action"], "examples"),
+        ]
+        for row in owner_backfill_data[:DISPLAY_ROW_LIMIT]
+    ]
 
     generated_text = generated_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     cards = "".join(
@@ -675,6 +689,12 @@ def _render_dashboard_html(
         <ul>{insight_items}</ul>
       </section>
       <section class="panel">
+        <h2>Owner Backfill Recommendations</h2>
+        <p class="section-copy">{len(owner_backfill_data)} resources have CreatedBy but are missing Owner. Recommended owner is intentionally blank until an administrator confirms the correct team or person.</p>
+        <p class="section-copy">Table display may be limited to the first {DISPLAY_ROW_LIMIT} rows; full data is available in CSV exports.</p>
+        <div class="table-wrap">{_table(["CreatedBy", "Resource Name", "Type", "Compartment", "OracleCreatedOn", "NoShutDown", "Suggested Action"], owner_backfill_table_rows, raw=True) if owner_backfill_table_rows else '<div class="empty">No owner backfill recommendations for the current scan.</div>'}</div>
+      </section>
+      <section class="panel">
         <h2>Mandatory Tag Compliance</h2>
         <p class="section-copy">Coverage for the current ownership tag model. These counts drive resource compliance.</p>
         <div class="table-wrap">{_table(["Tag", "Present Count", "Missing Count", "Compliance"], tag_rows, raw=True)}</div>
@@ -704,6 +724,7 @@ def _render_dashboard_html(
           <button class="quick-chip" type="button" data-chip="missing-owner">Missing Owner</button>
           <button class="quick-chip" type="button" data-chip="missing-createdby">Missing CreatedBy</button>
           <button class="quick-chip" type="button" data-chip="createdby-missing-owner">Has CreatedBy but Missing Owner</button>
+          <button class="quick-chip" type="button" data-chip="needs-owner-backfill">Needs Owner Backfill</button>
           <button class="quick-chip" type="button" data-chip="missing-both">Missing Both Ownership Tags</button>
           <button class="quick-chip" type="button" data-chip="has-both">Has Both Ownership Tags</button>
           <button class="quick-chip" type="button" data-chip="has-createdby">Has CreatedBy</button>
@@ -788,6 +809,7 @@ def _render_dashboard_html(
           if (type === "missing-owner") {{ setValue("inventoryMissingTag", "Owner"); }}
           if (type === "missing-createdby") {{ setValue("inventoryMissingTag", "CreatedBy"); }}
           if (type === "createdby-missing-owner") {{ setValue("inventoryOwnershipPattern", "missing-owner"); }}
+          if (type === "needs-owner-backfill") {{ setValue("inventoryOwnershipPattern", "missing-owner"); }}
           if (type === "missing-both") {{ setValue("inventoryOwnershipPattern", "missing-both"); }}
           if (type === "has-both") {{ setValue("inventoryOwnershipPattern", "both"); }}
           if (type === "has-createdby") {{ setValue("inventoryOwnershipPattern", "has-createdby"); }}

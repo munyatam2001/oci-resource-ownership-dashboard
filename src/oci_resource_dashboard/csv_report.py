@@ -8,6 +8,7 @@ from typing import Any, Mapping
 
 from .compliance import evaluate_resource_compliance, summarize_compliance
 from .models import MandatoryTag
+from .owner_backfill import OWNER_BACKFILL_HEADERS, owner_backfill_rows
 from .ownership_coverage import ownership_coverage_rows, summarize_ownership_coverage
 from .tag_diagnostics import collect_tag_usage, find_mapping_hints, tag_usage_rows
 from .tag_extractors import extract_no_shutdown, extract_oracle_created_on
@@ -93,6 +94,7 @@ CSV_FILENAMES = {
     "tag_usage": "oci_tag_key_usage.csv",
     "mapping_hints": "oci_tag_mapping_hints.csv",
     "ownership_coverage": "oci_ownership_coverage_summary.csv",
+    "owner_backfill": "oci_owner_backfill_recommendations.csv",
 }
 
 
@@ -229,6 +231,11 @@ def write_csv_outputs(
         paths["ownership_coverage"],
         OWNERSHIP_COVERAGE_HEADERS,
         ownership_coverage_rows(summarize_ownership_coverage(resource_list, tags)),
+    )
+    _write_rows(
+        paths["owner_backfill"],
+        OWNER_BACKFILL_HEADERS,
+        owner_backfill_rows(resource_list, tags),
     )
 
     return [paths[name] for name in CSV_FILENAMES]

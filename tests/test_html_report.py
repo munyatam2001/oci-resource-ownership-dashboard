@@ -82,6 +82,15 @@ def test_dashboard_contains_ownership_coverage_section(tmp_path):
     assert "Resources missing only Owner" in html
 
 
+def test_dashboard_contains_owner_backfill_recommendations(tmp_path):
+    html = _render_dashboard(tmp_path).read_text(encoding="utf-8")
+
+    assert "Owner Backfill Recommendations" in html
+    assert "resources have CreatedBy but are missing Owner" in html
+    assert "Contact CreatedBy user or owning team to confirm Owner tag value" in html
+    assert "Needs Owner Backfill" in html
+
+
 def test_dashboard_contains_filter_toolbar_controls(tmp_path):
     html = _render_dashboard(tmp_path).read_text(encoding="utf-8")
 
